@@ -6,6 +6,9 @@ import Link from 'next/link'
 import { getMemo, clearToken, type Memo } from '@/lib/api'
 import MemoDetail from '@/components/MemoDetail'
 import ChatPanel from '@/components/ChatPanel'
+import ThinkingTrace from '@/components/ThinkingTrace'
+import SourcesPanel from '@/components/SourcesPanel'
+import EvalScoreBar from '@/components/EvalScoreBar'
 
 export default function MemoPage() {
   const router = useRouter()
@@ -119,6 +122,23 @@ export default function MemoPage() {
           <div className="lg:w-[60%] flex-shrink-0">
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
               <MemoDetail memo={memo} />
+
+              {/* ── Week 2 additions ── */}
+              {(memo.eval_scores !== null ||
+                memo.thinking_trace.length > 0 ||
+                memo.sources.length > 0) && (
+                <div className="border-t border-gray-800 mt-6 pt-6 flex flex-col gap-6">
+                  {memo.eval_scores !== null && (
+                    <EvalScoreBar scores={memo.eval_scores} />
+                  )}
+                  {memo.thinking_trace.length > 0 && (
+                    <ThinkingTrace thinkingBlocks={memo.thinking_trace} />
+                  )}
+                  {memo.sources.length > 0 && (
+                    <SourcesPanel sources={memo.sources} />
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

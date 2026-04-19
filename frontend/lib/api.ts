@@ -1,5 +1,27 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+export interface ThinkingBlock {
+  type: 'thinking'
+  thinking: string
+}
+
+export interface Source {
+  text: string
+  doc_type: string  // "10-K" | "10-Q" | "8-K"
+  filing_date: string
+  chunk_id?: string
+}
+
+export interface EvalScores {
+  data_grounding: number
+  thesis_clarity: number
+  risk_depth: number
+  valuation_rigor: number
+  actionability: number
+  overall: number
+  rationale: Record<string, string>
+}
+
 export interface Memo {
   id: string
   ticker: string
@@ -9,9 +31,9 @@ export interface Memo {
   recommendation: string
   conviction: string
   markdown_text: string
-  thinking_trace: unknown[]
-  sources: unknown[]
-  eval_scores: Record<string, number> | null
+  thinking_trace: ThinkingBlock[]
+  sources: Source[]
+  eval_scores: EvalScores | null
   data_as_of: string
   created_at: string
 }

@@ -74,23 +74,6 @@ export default function MemoDetail({ memo }: MemoDetailProps) {
           )}
         </div>
 
-        {/* Eval scores */}
-        {memo.eval_scores && Object.keys(memo.eval_scores).length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-3">
-            {Object.entries(memo.eval_scores).map(([key, value]) => (
-              <div
-                key={key}
-                className="flex items-center gap-1.5 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5"
-              >
-                <span className="text-xs text-gray-400 capitalize">{key.replace(/_/g, ' ')}</span>
-                <span className="text-xs font-bold text-indigo-400">
-                  {typeof value === 'number' ? value.toFixed(1) : value}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* Disclaimer */}
         <p className="mt-4 text-xs text-gray-600 italic">
           For educational use only. Not financial advice.

@@ -40,28 +40,66 @@ def _build_user_message(
     strategy: str,
     sector: str,
     data_package: dict,
+    research_pack=None,
+    bull_case=None,
+    bear_case=None,
 ) -> str:
     """
     Build the user message that contains all financial context.
     We pass data as structured context so Claude never has to hallucinate numbers.
+
+    When research_pack, bull_case, and bear_case are provided (Week 2 pipeline),
+    the message is enriched with SEC excerpts, analyst notes, and the bull/bear arguments.
     """
     data_json = json.dumps(data_package, indent=2, default=str)
+    # Cap raw data to avoid overly long prompts
+    if len(data_json) > 4000:
+        data_json = data_json[:4000] + "\n... [truncated]"
 
-    return f"""Please write a comprehensive IC investment memo for the following equity position.
+    base = (
+        f"Please write a comprehensive IC investment memo for the following equity position.\n\n"
+        f"## Requested Strategy: {strategy.upper()}\n"
+        f"## Sector: {sector}\n"
+        f"## Ticker: {ticker}\n\n"
+        f"## Financial Data Package\n"
+        f"The following data was fetched as of the as_of_date field. Use ONLY these numbers.\n\n"
+        f"```json\n{data_json}\n```\n"
+    )
 
-## Requested Strategy: {strategy.upper()}
-## Sector: {sector}
-## Ticker: {ticker}
+    # Append research-pack enrichments if available (Week 2)
+    if research_pack is not None:
+        analyst_notes = getattr(research_pack, "analyst_notes", "")
+        if analyst_notes:
+            base += f"\n## Research Analyst Notes\n{analyst_notes[:2000]}\n"
 
-## Financial Data Package
-The following data was fetched as of the as_of_date field. Use ONLY these numbers.
+        sec_excerpts = getattr(research_pack, "sec_excerpts", [])
+        if sec_excerpts:
+            base += "\n## Key SEC Filing Excerpts (RAG)\n"
+            for i, excerpt in enumerate(sec_excerpts[:3]):
+                text = excerpt.get("text", "")[:400]
+                doc_type = excerpt.get("doc_type", "")
+                filing_date = excerpt.get("filing_date", "")
+                base += f"\n**Excerpt {i+1}** ({doc_type}, {filing_date}):\n> {text}\n"
 
-```json
-{data_json}
-```
+    if bull_case is not None:
+        bull_text = getattr(bull_case, "full_text", "")
+        if bull_text:
+            bull_trimmed = bull_text[:2000]
+            base += f"\n## Bull Case (Independent Analysis)\n{bull_trimmed}\n"
 
-Write the full IC memo following the structure in your system instructions. Ensure the recommendation and conviction level are clearly stated in the Executive Summary.
-"""
+    if bear_case is not None:
+        bear_text = getattr(bear_case, "full_text", "")
+        if bear_text:
+            bear_trimmed = bear_text[:2000]
+            base += f"\n## Bear Case (Independent Analysis)\n{bear_trimmed}\n"
+
+    base += (
+        "\nWrite the full IC memo following the structure in your system instructions. "
+        "Synthesize the bull and bear cases into a balanced, well-reasoned recommendation. "
+        "Ensure the recommendation and conviction level are clearly stated in the Executive Summary."
+    )
+
+    return base
 
 
 class MemoWriter:
@@ -82,14 +120,25 @@ class MemoWriter:
         strategy: str,
         sector: str,
         data_package: dict,
+        research_pack=None,
+        bull_case=None,
+        bear_case=None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream the memo as text chunks.
 
         Yields raw text delta strings as they arrive from Claude.
         Uses prompt caching on the system prompt for cost efficiency.
+
+        When research_pack, bull_case, and bear_case are provided, the prompt
+        is enriched with SEC excerpts, analyst notes, and the bull/bear arguments.
         """
-        user_message = _build_user_message(ticker, strategy, sector, data_package)
+        user_message = _build_user_message(
+            ticker, strategy, sector, data_package,
+            research_pack=research_pack,
+            bull_case=bull_case,
+            bear_case=bear_case,
+        )
 
         # System prompt with cache_control so it's cached across requests
         system = [
@@ -117,13 +166,23 @@ class MemoWriter:
         strategy: str,
         sector: str,
         data_package: dict,
+        research_pack=None,
+        bull_case=None,
+        bear_case=None,
     ) -> str:
         """
         Generate a complete memo and return the full markdown text.
 
         Uses prompt caching on the system prompt.
+        When research_pack, bull_case, and bear_case are provided, the prompt
+        is enriched with SEC excerpts, analyst notes, and the bull/bear arguments.
         """
-        user_message = _build_user_message(ticker, strategy, sector, data_package)
+        user_message = _build_user_message(
+            ticker, strategy, sector, data_package,
+            research_pack=research_pack,
+            bull_case=bull_case,
+            bear_case=bear_case,
+        )
 
         system = [
             {
