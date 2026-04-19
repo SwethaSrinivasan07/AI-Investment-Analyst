@@ -9,6 +9,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import anthropic
 
@@ -77,14 +78,18 @@ class BearAgent:
             "Follow the structure defined in your system instructions."
         )
 
+        thinking_budget = int(os.getenv("THINKING_BUDGET", "1024"))
+        api_kwargs: dict = dict(
+            model=self.model,
+            max_tokens=3000,
+            system=self.system_prompt,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        if thinking_budget >= 1024:
+            api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+
         try:
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=6000,
-                thinking={"type": "enabled", "budget_tokens": 5000},
-                system=self.system_prompt,
-                messages=[{"role": "user", "content": user_msg}],
-            )
+            response = await self.client.messages.create(**api_kwargs)
         except Exception as e:
             logger.error(f"BearAgent API call failed for {research_pack.ticker}: {e}")
             raise

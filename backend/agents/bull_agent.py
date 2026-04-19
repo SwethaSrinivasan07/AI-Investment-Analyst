@@ -97,10 +97,11 @@ class BullAgent:
 
     async def write_bull_case(self, research_pack: ResearchPack) -> BullCase:
         """
-        Generate the bull case with extended thinking.
+        Generate the bull case, optionally with extended thinking.
 
-        Uses claude-sonnet-4-6 with thinking budget to allow deeper reasoning
-        before producing the final written argument.
+        Thinking is controlled by the THINKING_BUDGET env var (default 1024).
+        Set THINKING_BUDGET=0 to disable thinking entirely (dev/low-cost mode).
+        Minimum effective budget when enabled is 1024 tokens (API requirement).
         """
         context = research_pack.to_context_string()
         # Cap context size to avoid excessive token usage
@@ -116,14 +117,18 @@ class BullAgent:
             "Follow the structure defined in your system instructions."
         )
 
+        thinking_budget = int(os.getenv("THINKING_BUDGET", "1024"))
+        api_kwargs: dict = dict(
+            model=self.model,
+            max_tokens=3000,
+            system=self.system_prompt,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        if thinking_budget >= 1024:
+            api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+
         try:
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=6000,
-                thinking={"type": "enabled", "budget_tokens": 5000},
-                system=self.system_prompt,
-                messages=[{"role": "user", "content": user_msg}],
-            )
+            response = await self.client.messages.create(**api_kwargs)
         except Exception as e:
             logger.error(f"BullAgent API call failed for {research_pack.ticker}: {e}")
             raise
