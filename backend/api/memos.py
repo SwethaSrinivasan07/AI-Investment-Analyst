@@ -19,7 +19,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.orchestrator import Orchestrator
-from api.auth import get_current_user
+from api.auth import get_current_user, get_current_user_sse
 from models.database import get_db
 from models.models import Memo, User
 
@@ -126,7 +126,7 @@ async def generate_memo(
 async def generate_memo_stream(
     strategy: str = Query(...),
     sector: str = Query(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_sse),
     db: AsyncSession = Depends(get_db),
 ):
     """

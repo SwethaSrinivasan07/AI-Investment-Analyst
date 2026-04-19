@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -73,20 +73,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
+async def _resolve_user_from_token(token: str, db: AsyncSession) -> User:
+    """Decode a JWT and return the matching User, or raise 401."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
-    if credentials is None:
-        raise credentials_exception
-
-    token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
@@ -99,8 +92,43 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
-
     return user
+
+
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Auth dependency for normal (non-SSE) endpoints — reads Bearer header."""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await _resolve_user_from_token(credentials.credentials, db)
+
+
+async def get_current_user_sse(
+    token: Optional[str] = Query(default=None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    Auth dependency for SSE/EventSource endpoints.
+
+    EventSource cannot set custom headers, so the client passes the JWT as
+    a `?token=` query parameter.  Falls back to the Authorization header so
+    the same dep works for programmatic callers too.
+    """
+    raw_token = token or (credentials.credentials if credentials else None)
+    if raw_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await _resolve_user_from_token(raw_token, db)
 
 
 # --- Endpoints ---
