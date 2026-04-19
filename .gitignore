@@ -26,6 +26,9 @@ out/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+package-lock.json
 
 # Database files
 *.db
