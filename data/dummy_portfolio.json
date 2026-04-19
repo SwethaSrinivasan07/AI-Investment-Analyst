@@ -1,0 +1,66 @@
+[
+  {
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
+    "shares": 15,
+    "cost_basis": 162.50,
+    "sector": "Information Technology",
+    "added_date": "2024-09-15"
+  },
+  {
+    "ticker": "MSFT",
+    "company_name": "Microsoft Corporation",
+    "shares": 8,
+    "cost_basis": 385.00,
+    "sector": "Information Technology",
+    "added_date": "2024-08-20"
+  },
+  {
+    "ticker": "JNJ",
+    "company_name": "Johnson & Johnson",
+    "shares": 12,
+    "cost_basis": 158.75,
+    "sector": "Health Care",
+    "added_date": "2024-10-01"
+  },
+  {
+    "ticker": "JPM",
+    "company_name": "JPMorgan Chase & Co.",
+    "shares": 10,
+    "cost_basis": 195.00,
+    "sector": "Financials",
+    "added_date": "2024-07-10"
+  },
+  {
+    "ticker": "XOM",
+    "company_name": "Exxon Mobil Corporation",
+    "shares": 20,
+    "cost_basis": 105.50,
+    "sector": "Energy",
+    "added_date": "2024-11-05"
+  },
+  {
+    "ticker": "PG",
+    "company_name": "Procter & Gamble Co.",
+    "shares": 9,
+    "cost_basis": 152.00,
+    "sector": "Consumer Staples",
+    "added_date": "2024-09-30"
+  },
+  {
+    "ticker": "AMZN",
+    "company_name": "Amazon.com Inc.",
+    "shares": 5,
+    "cost_basis": 178.25,
+    "sector": "Consumer Discretionary",
+    "added_date": "2024-12-01"
+  },
+  {
+    "ticker": "NEE",
+    "company_name": "NextEra Energy Inc.",
+    "shares": 18,
+    "cost_basis": 72.00,
+    "sector": "Utilities",
+    "added_date": "2025-01-15"
+  }
+]
