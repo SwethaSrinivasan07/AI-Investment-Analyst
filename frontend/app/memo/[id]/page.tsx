@@ -125,17 +125,17 @@ export default function MemoPage() {
 
               {/* ── Week 2 additions ── */}
               {(memo.eval_scores !== null ||
-                memo.thinking_trace.length > 0 ||
-                memo.sources.length > 0) && (
+                (memo.thinking_trace?.length ?? 0) > 0 ||
+                (memo.sources?.length ?? 0) > 0) && (
                 <div className="border-t border-gray-800 mt-6 pt-6 flex flex-col gap-6">
                   {memo.eval_scores !== null && (
                     <EvalScoreBar scores={memo.eval_scores} />
                   )}
-                  {memo.thinking_trace.length > 0 && (
-                    <ThinkingTrace thinkingBlocks={memo.thinking_trace} />
+                  {(memo.thinking_trace?.length ?? 0) > 0 && (
+                    <ThinkingTrace thinkingBlocks={memo.thinking_trace!} />
                   )}
-                  {memo.sources.length > 0 && (
-                    <SourcesPanel sources={memo.sources} />
+                  {(memo.sources?.length ?? 0) > 0 && (
+                    <SourcesPanel sources={memo.sources!} />
                   )}
                 </div>
               )}

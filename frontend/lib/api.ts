@@ -31,8 +31,8 @@ export interface Memo {
   recommendation: string
   conviction: string
   markdown_text: string
-  thinking_trace: ThinkingBlock[]
-  sources: Source[]
+  thinking_trace: ThinkingBlock[] | null
+  sources: Source[] | null
   eval_scores: EvalScores | null
   data_as_of: string
   created_at: string
