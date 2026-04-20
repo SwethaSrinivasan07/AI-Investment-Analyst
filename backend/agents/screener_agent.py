@@ -4,6 +4,7 @@ ScreenerAgent: screens tickers by strategy and sector, returns ranked picks.
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from services.data_fetcher import (
@@ -57,19 +58,17 @@ class ScreenerAgent:
         results = []
         for ticker in peers:
             try:
-                # Compute strategy score
-                if strategy == "value":
-                    score = score_fn(ticker, sector)
-                else:
-                    score = score_fn(ticker)
-
-                if score <= 0:
-                    continue
-
-                # Gather data package (fundamentals + price history + news)
+                # Fetch all data ONCE per ticker (avoids duplicate yfinance calls)
                 fundamentals = get_fundamentals(ticker)
                 price_data = get_price_history(ticker, period="1y")
                 news = get_news_sentiment(ticker)
+
+                # Compute strategy score from pre-fetched data
+                score = _score_from_data(strategy, sector, fundamentals, price_data)
+
+                if score <= 0:
+                    time.sleep(0.3)  # still throttle even on skip
+                    continue
 
                 data_package = {
                     **fundamentals,
@@ -93,7 +92,6 @@ class ScreenerAgent:
                     "score": score,
                 }
 
-                # Build human-readable signals summary
                 signals = _build_signals(strategy, fundamentals, price_data, score)
 
                 results.append({
@@ -106,7 +104,10 @@ class ScreenerAgent:
 
             except Exception as e:
                 logger.warning(f"Screener skipping {ticker}: {e}")
-                continue
+
+            finally:
+                # Throttle: 0.4s between tickers to avoid Yahoo Finance 429s
+                time.sleep(0.4)
 
         # Sort by score descending, return top N
         results.sort(key=lambda x: x["score"], reverse=True)
@@ -117,6 +118,164 @@ class ScreenerAgent:
     ) -> list[dict[str, Any]]:
         """Async wrapper — runs synchronous screen() in a thread."""
         return await asyncio.to_thread(self.screen, strategy, sector, num_picks)
+
+
+def _score_from_data(
+    strategy: str,
+    sector: str,
+    fundamentals: dict,
+    price_data: dict,
+) -> float:
+    """
+    Compute strategy score from pre-fetched data dicts.
+    Avoids re-calling yfinance (which the original score functions do internally).
+    """
+    try:
+        if strategy == "momentum":
+            m1 = price_data.get("price_change_1m_pct", 0) or 0
+            m3 = price_data.get("price_change_3m_pct", 0) or 0
+            m6 = price_data.get("price_change_6m_pct", 0) or 0
+            rsi = price_data.get("rsi_14", 50) or 50
+
+            def norm(r):
+                return (max(-50, min(50, r)) + 50) / 100 * 100
+
+            if 55 <= rsi <= 70:
+                rsi_score = 90.0
+            elif 45 <= rsi < 55:
+                rsi_score = 60.0
+            elif 70 < rsi <= 80:
+                rsi_score = 70.0
+            elif rsi > 80:
+                rsi_score = 40.0
+            else:
+                rsi_score = 30.0
+
+            return round(min(100, max(0,
+                norm(m1) * 0.30 + norm(m3) * 0.30 + norm(m6) * 0.20 + rsi_score * 0.20
+            )), 2)
+
+        elif strategy == "value":
+            pe = fundamentals.get("pe_ratio")
+            pb = fundamentals.get("pb_ratio")
+            ev_ebitda = fundamentals.get("ev_ebitda")
+            fcf_yield = fundamentals.get("fcf_yield") or 0
+            ps = fundamentals.get("ps_ratio")
+
+            def spe(v):
+                if v is None or v <= 0: return 50.0
+                if v < 12: return 95.0
+                if v < 18: return 80.0
+                if v < 25: return 60.0
+                if v < 35: return 40.0
+                return 20.0
+
+            def spb(v):
+                if v is None or v <= 0: return 50.0
+                if v < 1.0: return 95.0
+                if v < 2.0: return 80.0
+                if v < 3.5: return 60.0
+                if v < 5.0: return 40.0
+                return 20.0
+
+            def sev(v):
+                if v is None or v <= 0: return 50.0
+                if v < 8: return 95.0
+                if v < 12: return 75.0
+                if v < 18: return 55.0
+                if v < 25: return 35.0
+                return 15.0
+
+            def sfcf(v):
+                if v is None: return 50.0
+                if v > 8: return 95.0
+                if v > 5: return 80.0
+                if v > 3: return 60.0
+                if v > 0: return 40.0
+                return 20.0
+
+            def sps(v):
+                if v is None or v <= 0: return 50.0
+                if v < 1.0: return 95.0
+                if v < 2.5: return 75.0
+                if v < 5.0: return 55.0
+                if v < 10.0: return 35.0
+                return 15.0
+
+            return round(min(100, max(0,
+                spe(pe) * 0.25 + spb(pb) * 0.20 + sev(ev_ebitda) * 0.20 +
+                sfcf(fcf_yield) * 0.20 + sps(ps) * 0.15
+            )), 2)
+
+        elif strategy == "growth":
+            rev_growth = fundamentals.get("revenue_growth_yoy") or 0
+            gross_margin = fundamentals.get("gross_margin") or 0
+            op_margin = fundamentals.get("operating_margin") or 0
+            m3 = price_data.get("price_change_3m_pct", 0) or 0
+
+            def srg(g):
+                if g > 40: return 95.0
+                if g > 25: return 85.0
+                if g > 15: return 70.0
+                if g > 8: return 55.0
+                if g > 0: return 40.0
+                return 20.0
+
+            def sm(v, thresholds):
+                for t, s in thresholds:
+                    if v >= t: return s
+                return 20.0
+
+            return round(min(100, max(0,
+                srg(rev_growth) * 0.35 +
+                sm(gross_margin, [(70,95),(50,80),(35,65),(20,45),(0,30)]) * 0.25 +
+                sm(op_margin,    [(30,95),(20,80),(12,65),(5,45),(0,30)]) * 0.20 +
+                max(0, min(100, (m3 + 30) / 60 * 100)) * 0.20
+            )), 2)
+
+        elif strategy == "dividend":
+            div_yield = fundamentals.get("dividend_yield") or 0
+            payout_ratio = fundamentals.get("payout_ratio") or 0
+            debt_to_equity = fundamentals.get("debt_to_equity") or 0
+            change_1y = abs(price_data.get("price_change_1y_pct", 0) or 0)
+
+            def sy(y):
+                if 3.0 <= y <= 5.0: return 95.0
+                if 2.0 <= y < 3.0: return 80.0
+                if 5.0 < y <= 7.0: return 75.0
+                if 1.0 <= y < 2.0: return 55.0
+                if y > 7.0: return 50.0
+                return 15.0
+
+            def sp(p):
+                if p == 0: return 30.0
+                if 30 <= p <= 60: return 95.0
+                if 20 <= p < 30: return 80.0
+                if 60 < p <= 75: return 65.0
+                if 75 < p <= 90: return 40.0
+                return 20.0
+
+            def ss(c):
+                if c < 10: return 90.0
+                if c < 20: return 75.0
+                if c < 35: return 55.0
+                return 30.0
+
+            def sd(d):
+                if d is None or d == 0: return 80.0
+                if d < 50: return 90.0
+                if d < 100: return 70.0
+                if d < 200: return 50.0
+                return 25.0
+
+            return round(min(100, max(0,
+                sy(div_yield) * 0.40 + sp(payout_ratio) * 0.25 +
+                ss(change_1y) * 0.20 + sd(debt_to_equity) * 0.15
+            )), 2)
+
+    except Exception as e:
+        logger.warning(f"_score_from_data({strategy}): {e}")
+    return 0.0
 
 
 def _build_signals(
