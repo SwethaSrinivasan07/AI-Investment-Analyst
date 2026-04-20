@@ -15,6 +15,7 @@ from typing import Any
 import anthropic
 
 from tools.financial_tools import FINANCIAL_TOOLS, execute_tool
+from models.database import settings
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +63,11 @@ class ResearchAgent:
     """
 
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self.model = "claude-sonnet-4-6"
         # Configurable via env. Default 5 — enough for 4-5 tool calls + synthesis.
         # Lower = fewer API calls = lower cost. Raise to 8 for richer research.
-        self.max_turns = int(os.getenv("RESEARCH_MAX_TURNS", "5"))
+        self.max_turns = settings.research_max_turns
         self._load_system_prompt()
 
     def _load_system_prompt(self) -> None:

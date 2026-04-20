@@ -14,6 +14,8 @@ from typing import Optional
 
 import anthropic
 
+from models.database import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +40,7 @@ class EvalAgent:
     """
 
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         # Haiku is 10x cheaper than Sonnet and perfectly capable for structured JSON scoring.
         self.model = "claude-haiku-4-5"
         self._load_system_prompt()

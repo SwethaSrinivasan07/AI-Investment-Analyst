@@ -8,6 +8,11 @@ Run with:
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+# override=True forces .env values to win over any empty/stale OS env vars
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

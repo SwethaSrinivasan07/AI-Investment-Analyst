@@ -1,6 +1,12 @@
+from pathlib import Path
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from pydantic_settings import BaseSettings
+
+# Absolute path to .env — works regardless of process working directory.
+# This file lives at backend/models/database.py, so .parent.parent = backend/
+_ENV_FILE = str(Path(__file__).parent.parent / ".env")
 
 
 class Settings(BaseSettings):
@@ -11,13 +17,13 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./alphalens.db"
     chroma_persist_path: str = "./chroma_db"
     frontend_url: str = "http://localhost:3000"
-    # Cost-control knobs (read by agents via os.getenv; declared here so
-    # pydantic-settings doesn't reject them as extra fields)
+    # Cost-control knobs read by agents via settings.*
     thinking_budget: int = 1024
     research_max_turns: int = 5
 
     class Config:
-        env_file = ".env"
+        env_file = _ENV_FILE
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()

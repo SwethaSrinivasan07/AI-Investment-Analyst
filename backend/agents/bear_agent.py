@@ -15,6 +15,7 @@ import anthropic
 
 from .research_agent import ResearchPack
 from .bull_agent import _extract_section, _extract_list  # reuse helpers
+from models.database import settings
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class BearAgent:
     """
 
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self.model = "claude-sonnet-4-6"
         self._load_system_prompt()
 
@@ -78,7 +79,7 @@ class BearAgent:
             "Follow the structure defined in your system instructions."
         )
 
-        thinking_budget = int(os.getenv("THINKING_BUDGET", "1024"))
+        thinking_budget = settings.thinking_budget
         api_kwargs: dict = dict(
             model=self.model,
             max_tokens=3000,
