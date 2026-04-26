@@ -18,10 +18,11 @@ pydantic-settings>=2.3.0
 pandas>=2.2.3
 numpy>=1.26.4
 scipy>=1.14.0
-chromadb==0.4.24
+chromadb>=1.0.0
 sentence-transformers==2.6.1
 APScheduler==3.10.4
 sendgrid==6.11.0
 pytest==8.1.0
 pytest-asyncio==0.23.5
 aiosqlite==0.20.0
+alpaca-py>=0.26.0

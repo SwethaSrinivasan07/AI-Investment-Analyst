@@ -38,6 +38,7 @@ class Memo(Base):
     thinking_trace = Column(JSON)  # list of thinking blocks
     sources = Column(JSON)  # list of source citations
     eval_scores = Column(JSON)  # {data_grounding, thesis_clarity, risk_depth, valuation_rigor, actionability}
+    usage_stats = Column(JSON)  # {input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, estimated_cost_usd}
     data_as_of = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -93,3 +94,48 @@ class AVCache(Base):
     endpoint = Column(String, nullable=False)
     response_data = Column(JSON, nullable=False)
     cached_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BacktestResult(Base):
+    __tablename__ = "backtest_results"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    strategy = Column(String, nullable=False)
+    sector = Column(String, nullable=False)
+    period = Column(String, nullable=False)  # "1y" | "2y"
+    metrics = Column(JSON)  # {cumulative_return_pct, annualized_return_pct, sharpe_ratio, max_drawdown_pct, win_rate_pct, alpha_vs_spy_pct, volatility_pct}
+    chart_data = Column(JSON)  # [{date, portfolio, spy, sector_etf}]
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PortfolioAlert(Base):
+    __tablename__ = "portfolio_alerts"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    ticker = Column(String)                   # null = portfolio-level alert
+    alert_type = Column(String, nullable=False)  # price_move|news|signal|opportunity
+    severity = Column(String, nullable=False)    # info|warning|action
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    data = Column(JSON)                       # {price_change_pct, signal, etc.}
+    read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PortfolioOrder(Base):
+    __tablename__ = "portfolio_orders"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    ticker = Column(String, nullable=False)
+    side = Column(String, nullable=False)     # buy|sell
+    qty = Column(Float, nullable=False)
+    order_type = Column(String, default="market")
+    status = Column(String, nullable=False)   # pending|submitted|filled|cancelled|rejected
+    alpaca_order_id = Column(String)
+    filled_price = Column(Float)
+    source = Column(String, default="ai_signal")  # ai_signal|manual
+    rationale = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    filled_at = Column(DateTime)
