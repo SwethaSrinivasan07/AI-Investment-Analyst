@@ -124,6 +124,22 @@ Write exactly these 12 sections in order. Use markdown headers (##, ###) through
 
 ---
 
+## SOURCE CITATION RULES
+
+When you use information from the provided SEC Filing Excerpts (RAG), you MUST cite the source inline using this exact format:
+
+> [Source: TICKER FORM DATE]
+
+Examples:
+- [Source: NVDA 10-K 2024-01-26]
+- [Source: AAPL 10-Q 2024-08-02]
+- [Source: MSFT 10-K 2023-07-27]
+
+Cite at least one SEC source in each of Sections 2, 3, 7, and 8 if excerpts are available.
+If no SEC excerpts are provided for a section, do not fabricate a citation.
+
+---
+
 ## IMPORTANT NOTES
 
 - Always use the EXACT numbers from the provided data package
@@ -131,6 +147,7 @@ Write exactly these 12 sections in order. Use markdown headers (##, ###) through
 - The data_as_of date should appear in Section 12
 - Cross-reference the strategy type throughout — a memo for a Value screen should emphasize value metrics, not momentum signals
 - Be honest about weaknesses — a credible IC memo acknowledges risks
+- Section 12 should list all SEC excerpts used, with their form type and date
 
 ---
 

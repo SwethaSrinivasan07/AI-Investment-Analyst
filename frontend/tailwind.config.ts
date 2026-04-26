@@ -6,7 +6,11 @@ const config: Config = {
     './components/**/*.{ts,tsx}',
   ],
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        serif: ['Spectral', 'Georgia', 'serif'],
+      },
+    },
   },
   plugins: [],
 }

@@ -44,3 +44,12 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add columns introduced after initial schema — safe to re-run (SQLite ignores duplicates)
+        for stmt in [
+            "ALTER TABLE memos ADD COLUMN usage_stats TEXT",
+            "ALTER TABLE backtest_results ADD COLUMN strategy TEXT",  # backtest migration safety
+        ]:
+            try:
+                await conn.execute(__import__('sqlalchemy').text(stmt))
+            except Exception:
+                pass  # column already exists

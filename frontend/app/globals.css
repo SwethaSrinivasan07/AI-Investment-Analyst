@@ -1,3 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    background-color: #F6F3EE;
+    color: #121212;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  *, *::before, *::after {
+    border-radius: 0;
+  }
+}

@@ -135,6 +135,7 @@ class Orchestrator:
         strategy: str,
         sector: str,
         num_picks: int = 1,
+        ticker: str = None,
         db=None,  # AsyncSession | None — kept for backward compatibility
     ) -> Memo:
         """
@@ -142,23 +143,54 @@ class Orchestrator:
 
         The db parameter is accepted for backward compatibility but the
         orchestrator now manages its own DB sessions internally.
+
+        When ticker is provided the screener is skipped and a data package is
+        built directly for that ticker.
         """
-        # 1. Screen
-        logger.info(f"[Orchestrator] Screening {sector}/{strategy} for user {user_id}")
-        candidates = await asyncio.to_thread(
-            self.screener.screen, strategy, sector, num_picks
-        )
-        if not candidates:
-            raise ValueError(
-                f"No qualifying tickers found for strategy='{strategy}', sector='{sector}'"
+        if ticker:
+            # Skip screener — build data package directly for the requested ticker
+            logger.info(f"[Orchestrator] Bypassing screener for explicit ticker={ticker}")
+            from services.data_fetcher import get_fundamentals, get_price_history, get_news_sentiment
+            ticker = ticker.upper()
+            fundamentals = await asyncio.to_thread(get_fundamentals, ticker)
+            price_data = await asyncio.to_thread(get_price_history, ticker, "1y")
+            news = await asyncio.to_thread(get_news_sentiment, ticker)
+            company_name: str = fundamentals.get("company_name") or ticker
+            data_package: dict = {
+                **fundamentals,
+                "price_history": {
+                    k: price_data.get(k)
+                    for k in [
+                        "current_price", "price_change_1d_pct", "price_change_1m_pct",
+                        "price_change_3m_pct", "price_change_6m_pct", "price_change_1y_pct",
+                        "ma_50", "ma_200", "rsi_14",
+                    ]
+                },
+                "news_sentiment": {
+                    "sentiment_score": news.get("sentiment_score"),
+                    "headlines": news.get("headlines", [])[:5],
+                },
+                "strategy": strategy,
+                "sector": sector,
+                "score": 0,
+            }
+        else:
+            # 1. Screen
+            logger.info(f"[Orchestrator] Screening {sector}/{strategy} for user {user_id}")
+            candidates = await asyncio.to_thread(
+                self.screener.screen, strategy, sector, num_picks
             )
+            if not candidates:
+                raise ValueError(
+                    f"No qualifying tickers found for strategy='{strategy}', sector='{sector}'"
+                )
 
-        top = candidates[0]
-        ticker: str = top["ticker"]
-        company_name: str = top.get("company_name", ticker)
-        data_package: dict = top.get("data_package", {})
+            top = candidates[0]
+            ticker: str = top["ticker"]
+            company_name: str = top.get("company_name", ticker)
+            data_package: dict = top.get("data_package", {})
 
-        logger.info(f"[Orchestrator] Top pick: {ticker} (score={top['score']:.1f})")
+        logger.info(f"[Orchestrator] Top pick: {ticker}")
 
         # 2. Research (multi-turn tool use)
         logger.info(f"[Orchestrator] Researching {ticker}...")
@@ -225,6 +257,7 @@ class Orchestrator:
                 markdown_text=memo_text,
                 thinking_trace=all_thinking,
                 sources=sources,
+                usage_stats=self.writer.last_usage or None,
                 data_as_of=datetime.utcnow(),
             )
             session.add(memo)
@@ -252,6 +285,7 @@ class Orchestrator:
         strategy: str,
         sector: str,
         num_picks: int = 1,
+        ticker: str = None,
         db=None,  # kept for backward compatibility
     ) -> AsyncGenerator[str, None]:
         """
@@ -262,32 +296,70 @@ class Orchestrator:
         - {"type": "token",  "content": "..."}           — memo text chunks
         - {"type": "done",   "memo_id": "...", ...}      — completion
         - {"type": "error",  "message": "..."}           — failure
+
+        When ticker is provided the screener is skipped and a data package is
+        built directly for that ticker.
         """
         try:
-            # 1. Screen
-            yield _sse({"type": "status", "message": f"Screening {sector} sector for {strategy} picks..."})
-            candidates = await asyncio.to_thread(
-                self.screener.screen, strategy, sector, num_picks
-            )
-            if not candidates:
+            if ticker:
+                # Skip screener — build data package directly for the requested ticker
+                ticker = ticker.upper()
+                yield _sse({"type": "status", "message": f"Fetching data for {ticker}..."})
+                from services.data_fetcher import get_fundamentals, get_price_history, get_news_sentiment
+                fundamentals = await asyncio.to_thread(get_fundamentals, ticker)
+                price_data = await asyncio.to_thread(get_price_history, ticker, "1y")
+                news = await asyncio.to_thread(get_news_sentiment, ticker)
+                company_name: str = fundamentals.get("company_name") or ticker
+                data_package: dict = {
+                    **fundamentals,
+                    "price_history": {
+                        k: price_data.get(k)
+                        for k in [
+                            "current_price", "price_change_1d_pct", "price_change_1m_pct",
+                            "price_change_3m_pct", "price_change_6m_pct", "price_change_1y_pct",
+                            "ma_50", "ma_200", "rsi_14",
+                        ]
+                    },
+                    "news_sentiment": {
+                        "sentiment_score": news.get("sentiment_score"),
+                        "headlines": news.get("headlines", [])[:5],
+                    },
+                    "strategy": strategy,
+                    "sector": sector,
+                    "score": 0,
+                }
                 yield _sse({
-                    "type": "error",
-                    "message": f"No qualifying tickers found for {strategy}/{sector}",
+                    "type": "status",
+                    "message": f"Generating memo for {ticker} ({company_name})...",
+                    "ticker": ticker,
+                    "company_name": company_name,
+                    "score": 0,
                 })
-                return
+            else:
+                # 1. Screen
+                yield _sse({"type": "status", "message": f"Screening {sector} sector for {strategy} picks..."})
+                candidates = await asyncio.to_thread(
+                    self.screener.screen, strategy, sector, num_picks
+                )
+                if not candidates:
+                    yield _sse({
+                        "type": "error",
+                        "message": f"No qualifying tickers found for {strategy}/{sector}",
+                    })
+                    return
 
-            top = candidates[0]
-            ticker: str = top["ticker"]
-            company_name: str = top.get("company_name", ticker)
-            data_package: dict = top.get("data_package", {})
+                top = candidates[0]
+                ticker: str = top["ticker"]
+                company_name: str = top.get("company_name", ticker)
+                data_package: dict = top.get("data_package", {})
 
-            yield _sse({
-                "type": "status",
-                "message": f"Selected {ticker} ({company_name}) — score {top['score']:.0f}/100",
-                "ticker": ticker,
-                "company_name": company_name,
-                "score": top["score"],
-            })
+                yield _sse({
+                    "type": "status",
+                    "message": f"Selected {ticker} ({company_name}) — score {top['score']:.0f}/100",
+                    "ticker": ticker,
+                    "company_name": company_name,
+                    "score": top["score"],
+                })
 
             # 2. Research
             yield _sse({"type": "status", "message": f"Researching {ticker} — fetching financials, SEC filings, news..."})
@@ -355,6 +427,7 @@ class Orchestrator:
                     markdown_text=memo_text,
                     thinking_trace=all_thinking,
                     sources=sources,
+                    usage_stats=self.writer.last_usage or None,
                     data_as_of=datetime.utcnow(),
                 )
                 session.add(memo)

@@ -74,9 +74,13 @@ def _build_user_message(
 
         sec_excerpts = getattr(research_pack, "sec_excerpts", [])
         if sec_excerpts:
-            base += "\n## Key SEC Filing Excerpts (RAG)\n"
-            for i, excerpt in enumerate(sec_excerpts[:3]):
-                text = excerpt.get("text", "")[:400]
+            base += (
+                "\n## Key SEC Filing Excerpts (RAG-retrieved from real filings)\n"
+                "_When you cite facts from these excerpts, use the format: "
+                "[Source: TICKER FORM DATE] — e.g. [Source: NVDA 10-K 2024-01-26]_\n"
+            )
+            for i, excerpt in enumerate(sec_excerpts[:8]):
+                text = excerpt.get("text", "")[:600]
                 doc_type = excerpt.get("doc_type", "")
                 filing_date = excerpt.get("filing_date", "")
                 base += f"\n**Excerpt {i+1}** ({doc_type}, {filing_date}):\n> {text}\n"
@@ -102,6 +106,36 @@ def _build_user_message(
     return base
 
 
+# Pricing for claude-sonnet-4-6 (per million tokens, USD)
+_PRICE = {
+    "input": 3.00,
+    "output": 15.00,
+    "cache_write": 3.75,
+    "cache_read": 0.30,
+}
+
+
+def _estimate_cost(usage) -> dict:
+    """Convert Anthropic usage object → cost dict."""
+    input_tok = getattr(usage, "input_tokens", 0) or 0
+    output_tok = getattr(usage, "output_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cost = (
+        (input_tok / 1_000_000) * _PRICE["input"]
+        + (output_tok / 1_000_000) * _PRICE["output"]
+        + (cache_read / 1_000_000) * _PRICE["cache_read"]
+        + (cache_write / 1_000_000) * _PRICE["cache_write"]
+    )
+    return {
+        "input_tokens": input_tok,
+        "output_tokens": output_tok,
+        "cache_read_tokens": cache_read,
+        "cache_creation_tokens": cache_write,
+        "estimated_cost_usd": round(cost, 5),
+    }
+
+
 class MemoWriter:
     """
     Generates IC investment memos using the Claude API.
@@ -113,6 +147,7 @@ class MemoWriter:
             api_key=settings.anthropic_api_key,
         )
         self._system_prompt = _load_system_prompt()
+        self.last_usage: dict = {}  # populated after each generation call
 
     async def generate_streaming(
         self,
@@ -159,6 +194,18 @@ class MemoWriter:
         ) as stream:
             async for text_chunk in stream.text_stream:
                 yield text_chunk
+            try:
+                final_message = await stream.get_final_message()
+                self.last_usage = _estimate_cost(final_message.usage)
+                logger.info(
+                    f"Memo streamed for {ticker}. "
+                    f"Input: {self.last_usage['input_tokens']} tok, "
+                    f"Cache read: {self.last_usage['cache_read_tokens']} tok, "
+                    f"Output: {self.last_usage['output_tokens']} tok, "
+                    f"Est. cost: ${self.last_usage['estimated_cost_usd']:.4f}"
+                )
+            except Exception:
+                pass
 
     async def generate(
         self,
@@ -205,11 +252,13 @@ class MemoWriter:
                 chunks.append(text_chunk)
 
             final_message = await stream.get_final_message()
+            self.last_usage = _estimate_cost(final_message.usage)
             logger.info(
                 f"Memo generated for {ticker}. "
-                f"Input tokens: {final_message.usage.input_tokens}, "
-                f"Cache read: {final_message.usage.cache_read_input_tokens}, "
-                f"Output tokens: {final_message.usage.output_tokens}"
+                f"Input: {self.last_usage['input_tokens']} tok, "
+                f"Cache read: {self.last_usage['cache_read_tokens']} tok, "
+                f"Output: {self.last_usage['output_tokens']} tok, "
+                f"Est. cost: ${self.last_usage['estimated_cost_usd']:.4f}"
             )
 
         return "".join(chunks)

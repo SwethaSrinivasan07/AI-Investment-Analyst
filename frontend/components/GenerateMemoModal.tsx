@@ -12,40 +12,34 @@ const STRATEGIES = ['Momentum', 'Value', 'Growth', 'Dividend'] as const
 type Strategy = (typeof STRATEGIES)[number]
 
 const SECTORS = [
-  'Information Technology',
-  'Health Care',
-  'Financials',
-  'Consumer Discretionary',
-  'Communication Services',
-  'Industrials',
-  'Consumer Staples',
-  'Energy',
-  'Utilities',
-  'Real Estate',
-  'Materials',
+  'Information Technology', 'Health Care', 'Financials', 'Consumer Discretionary',
+  'Communication Services', 'Industrials', 'Consumer Staples', 'Energy',
+  'Utilities', 'Real Estate', 'Materials',
 ] as const
 type Sector = (typeof SECTORS)[number]
 
 type GenerationPhase = 'idle' | 'screening' | 'fetching' | 'writing' | 'done' | 'error'
+type PickMode = 'auto' | 'specific'
 
 const phaseMessages: Record<GenerationPhase, string> = {
   idle: '',
   screening: 'Screening stocks...',
   fetching: 'Fetching market data...',
   writing: 'Writing investment memo...',
-  done: 'Memo generated!',
+  done: 'Memo generated.',
   error: 'Generation failed.',
 }
 
 export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
   const router = useRouter()
+  const [pickMode, setPickMode] = useState<PickMode>('auto')
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null)
   const [selectedSector, setSelectedSector] = useState<Sector | null>(null)
+  const [tickerInput, setTickerInput] = useState('')
   const [phase, setPhase] = useState<GenerationPhase>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
 
-  // Close on Escape key
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape' && phase === 'idle') onClose()
@@ -54,28 +48,32 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
     return () => window.removeEventListener('keydown', handleKey)
   }, [onClose, phase])
 
-  // Clean up EventSource on unmount
   useEffect(() => {
-    return () => {
-      eventSourceRef.current?.close()
-    }
+    return () => { eventSourceRef.current?.close() }
   }, [])
 
   const isGenerating = phase !== 'idle' && phase !== 'error'
 
+  const canGenerate = !isGenerating && selectedStrategy !== null && (
+    pickMode === 'auto' ? selectedSector !== null : tickerInput.trim().length >= 1
+  )
+
   function handleGenerate() {
-    if (!selectedStrategy || !selectedSector || isGenerating) return
+    if (!canGenerate || !selectedStrategy) return
 
     setPhase('screening')
     setErrorMessage(null)
 
-    const es = streamMemoGeneration(selectedStrategy.toLowerCase(), selectedSector)
+    const strategy = selectedStrategy.toLowerCase()
+    const sector = pickMode === 'auto' ? (selectedSector as string) : 'Auto'
+    const ticker = pickMode === 'specific' ? tickerInput.trim().toUpperCase() : undefined
+
+    const es = streamMemoGeneration(strategy, sector, ticker)
     eventSourceRef.current = es
 
     let dotTimer: ReturnType<typeof setTimeout> | null = null
 
     function advancePhase() {
-      // Cycle through phases to give visual feedback
       setPhase((current) => {
         if (current === 'screening') return 'fetching'
         if (current === 'fetching') return 'writing'
@@ -91,15 +89,12 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
         const parsed = JSON.parse(e.data) as { type: string; memo_id?: string; phase?: string }
         if (parsed.type === 'done' && parsed.memo_id) {
           if (dotTimer) clearTimeout(dotTimer)
-          es.close()
-          setPhase('done')
+          es.close(); setPhase('done')
           router.push(`/memo/${parsed.memo_id}`)
           onClose()
         } else if (parsed.type === 'phase' && parsed.phase) {
           const phaseMap: Record<string, GenerationPhase> = {
-            screening: 'screening',
-            fetching: 'fetching',
-            writing: 'writing',
+            screening: 'screening', fetching: 'fetching', writing: 'writing',
           }
           if (phaseMap[parsed.phase]) {
             if (dotTimer) clearTimeout(dotTimer)
@@ -107,67 +102,77 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
           }
         } else if (parsed.type === 'error') {
           if (dotTimer) clearTimeout(dotTimer)
-          es.close()
-          setPhase('error')
+          es.close(); setPhase('error')
           setErrorMessage('Generation failed on the server. Please try again.')
         }
-      } catch {
-        // ignore malformed events
-      }
+      } catch { /* ignore malformed */ }
     })
 
     es.addEventListener('error', () => {
       if (dotTimer) clearTimeout(dotTimer)
-      es.close()
-      setPhase('error')
+      es.close(); setPhase('error')
       setErrorMessage('Connection error during generation. Please try again.')
     })
   }
 
-  const strategyButtonClass = (s: Strategy) =>
-    `px-4 py-2.5 rounded-lg text-sm font-medium border transition-all ${
-      selectedStrategy === s
-        ? 'bg-indigo-600 border-indigo-500 text-white'
-        : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500 hover:text-white'
-    } ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/30"
         onClick={() => { if (phase === 'idle') onClose() }}
       />
 
-      {/* Modal */}
-      <div className="relative z-10 w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl shadow-black/60">
+      <div className="relative z-10 w-full max-w-[420px] bg-white border border-black/8">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-800">
-          <h2 className="text-lg font-semibold text-white">Generate Investment Memo</h2>
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-black/8">
+          <h2 className="text-[15px] font-medium text-[#121212]">Generate Memo</h2>
           {phase === 'idle' && (
             <button
               onClick={onClose}
-              className="text-gray-500 hover:text-gray-300 transition-colors"
-              aria-label="Close modal"
+              className="text-[#5C5C5C]/60 hover:text-[#121212] transition-colors"
+              aria-label="Close"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
         </div>
 
-        <div className="px-6 py-5 space-y-6">
-          {/* Strategy selector */}
+        <div className="px-5 py-5 space-y-5">
+          {/* Mode toggle */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-3">Strategy</label>
-            <div className="grid grid-cols-2 gap-2">
+            <label className="block text-[11px] font-medium text-[#5C5C5C] uppercase tracking-widest mb-2">Mode</label>
+            <div className="flex bg-[#F6F3EE] border border-black/8 p-1 gap-1">
+              {(['auto', 'specific'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  disabled={isGenerating}
+                  onClick={() => !isGenerating && setPickMode(mode)}
+                  className={`flex-1 py-1.5 px-3 text-[13px] font-medium transition-colors ${
+                    pickMode === mode ? 'bg-[#2E2A47] text-white' : 'text-[#5C5C5C] hover:text-[#121212]'
+                  } ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  {mode === 'auto' ? 'Auto-pick' : 'Specific stock'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Strategy */}
+          <div>
+            <label className="block text-[11px] font-medium text-[#5C5C5C] uppercase tracking-widest mb-2">Strategy</label>
+            <div className="grid grid-cols-2 gap-1.5">
               {STRATEGIES.map((s) => (
                 <button
                   key={s}
                   disabled={isGenerating}
                   onClick={() => !isGenerating && setSelectedStrategy(s)}
-                  className={strategyButtonClass(s)}
+                  className={`px-4 py-2 text-[13px] font-medium border transition-colors ${
+                    selectedStrategy === s
+                      ? 'bg-[#2E2A47] border-[#2E2A47] text-white'
+                      : 'bg-white border-black/8 text-[#5C5C5C] hover:border-black/20 hover:text-[#121212]'
+                  } ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   {s}
                 </button>
@@ -175,54 +180,74 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
             </div>
           </div>
 
-          {/* Sector selector */}
-          <div>
-            <label htmlFor="sector" className="block text-sm font-medium text-gray-300 mb-2">
-              Sector
-            </label>
-            <select
-              id="sector"
-              disabled={isGenerating}
-              value={selectedSector ?? ''}
-              onChange={(e) => setSelectedSector(e.target.value as Sector || null)}
-              className="w-full px-3.5 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="" disabled>Select a sector...</option>
-              {SECTORS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
+          {/* Sector */}
+          {pickMode === 'auto' && (
+            <div>
+              <label htmlFor="sector" className="block text-[11px] font-medium text-[#5C5C5C] uppercase tracking-widest mb-2">
+                Sector
+              </label>
+              <select
+                id="sector"
+                disabled={isGenerating}
+                value={selectedSector ?? ''}
+                onChange={(e) => setSelectedSector(e.target.value as Sector || null)}
+                className="w-full px-3 py-2 bg-white border border-black/8 text-[#121212] text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2E2A47] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="" disabled>Select a sector...</option>
+                {SECTORS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
 
-          {/* Generation progress */}
+          {/* Ticker */}
+          {pickMode === 'specific' && (
+            <div>
+              <label htmlFor="ticker" className="block text-[11px] font-medium text-[#5C5C5C] uppercase tracking-widest mb-2">
+                Ticker Symbol
+              </label>
+              <input
+                id="ticker"
+                type="text"
+                disabled={isGenerating}
+                value={tickerInput}
+                onChange={(e) => setTickerInput(e.target.value.toUpperCase().slice(0, 6))}
+                placeholder="e.g. NVDA, TSLA, AAPL"
+                className="w-full px-3 py-2 bg-white border border-black/8 text-[#121212] text-[13px] placeholder-[#5C5C5C]/40 focus:outline-none focus:ring-1 focus:ring-[#2E2A47] disabled:opacity-50 disabled:cursor-not-allowed tracking-widest uppercase"
+              />
+              <p className="mt-1.5 text-[11px] text-[#5C5C5C]/60">
+                Sector detected automatically from market data.
+              </p>
+            </div>
+          )}
+
+          {/* Progress */}
           {phase !== 'idle' && (
-            <div className={`px-4 py-3 rounded-lg border ${
+            <div className={`px-4 py-3 border ${
               phase === 'error'
-                ? 'bg-red-900/30 border-red-700'
-                : 'bg-indigo-900/20 border-indigo-800'
+                ? 'bg-[#A14A44]/8 border-[#A14A44]/20'
+                : 'bg-[#2E2A47]/5 border-[#2E2A47]/15'
             }`}>
               <div className="flex items-center gap-3">
                 {phase !== 'error' && phase !== 'done' && (
-                  <span className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                  <span className="w-3.5 h-3.5 border-2 border-[#2E2A47] border-t-transparent rounded-full animate-spin shrink-0" />
                 )}
                 {phase === 'done' && (
-                  <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-3.5 h-3.5 text-[#2F6B4F] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                 )}
                 {phase === 'error' && (
-                  <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-3.5 h-3.5 text-[#A14A44] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 )}
-                <p className={`text-sm font-medium ${phase === 'error' ? 'text-red-300' : 'text-indigo-300'}`}>
+                <p className={`text-[13px] font-medium ${phase === 'error' ? 'text-[#A14A44]' : 'text-[#2E2A47]'}`}>
                   {errorMessage ?? phaseMessages[phase]}
                 </p>
               </div>
 
-              {/* Progress steps */}
               {phase !== 'error' && (
-                <div className="mt-3 flex gap-1.5">
+                <div className="mt-3 flex gap-1">
                   {(['screening', 'fetching', 'writing'] as const).map((p) => {
                     const steps: GenerationPhase[] = ['screening', 'fetching', 'writing', 'done']
                     const currentIdx = steps.indexOf(phase)
@@ -233,12 +258,8 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
                     return (
                       <div
                         key={p}
-                        className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
-                          isDone
-                            ? 'bg-indigo-400'
-                            : isActive
-                            ? 'bg-indigo-500 animate-pulse'
-                            : 'bg-gray-700'
+                        className={`h-0.5 flex-1 transition-all duration-500 ${
+                          isDone ? 'bg-[#2E2A47]' : isActive ? 'bg-[#2E2A47] animate-pulse' : 'bg-black/10'
                         }`}
                       />
                     )
@@ -248,11 +269,10 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
             </div>
           )}
 
-          {/* Error retry */}
           {phase === 'error' && (
             <button
               onClick={() => setPhase('idle')}
-              className="w-full py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+              className="w-full py-2 text-[13px] text-[#5C5C5C] hover:text-[#121212] transition-colors"
             >
               Reset and try again
             </button>
@@ -261,11 +281,11 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
 
         {/* Footer */}
         {(phase === 'idle' || phase === 'error') && (
-          <div className="px-6 pb-6">
+          <div className="px-5 pb-5">
             <button
               onClick={handleGenerate}
-              disabled={!selectedStrategy || !selectedSector || isGenerating}
-              className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:cursor-not-allowed rounded-lg text-white font-medium text-sm transition-colors"
+              disabled={!canGenerate}
+              className="w-full py-2.5 px-4 bg-[#2E2A47] hover:bg-[#1E1A35] disabled:bg-black/5 disabled:text-[#5C5C5C]/40 disabled:cursor-not-allowed text-white font-medium text-[13px] transition-colors"
             >
               Generate Memo
             </button>

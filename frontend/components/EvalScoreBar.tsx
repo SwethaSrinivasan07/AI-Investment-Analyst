@@ -17,53 +17,56 @@ const DIMENSIONS: { key: DimensionKey; label: string }[] = [
 ]
 
 function overallColor(score: number): string {
-  if (score >= 4) return 'text-green-400'
-  if (score >= 3) return 'text-yellow-400'
-  return 'text-red-400'
+  if (score >= 4) return 'text-[#2F6B4F]'
+  if (score >= 3) return 'text-[#6B7280]'
+  return 'text-[#A14A44]'
 }
 
 function barColor(score: number): string {
-  if (score >= 4) return 'bg-green-500'
-  if (score >= 3) return 'bg-yellow-500'
-  return 'bg-red-500'
+  if (score >= 4) return 'bg-[#2F6B4F]'
+  if (score >= 3) return 'bg-[#6B7280]'
+  return 'bg-[#A14A44]'
+}
+
+function scoreTextColor(score: number): string {
+  if (score >= 4) return 'text-[#2F6B4F]'
+  if (score >= 3) return 'text-[#6B7280]'
+  return 'text-[#A14A44]'
 }
 
 function scoreWidth(score: number): string {
-  // score is 0–5, convert to %
   const pct = Math.min(Math.max((score / 5) * 100, 0), 100)
   return `${pct.toFixed(1)}%`
 }
 
 export default function EvalScoreBar({ scores }: EvalScoreBarProps) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-      {/* Header row */}
+    <div className="bg-white border border-black/8 p-4">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-          Memo Quality Score
+        <span className="text-[11px] font-medium uppercase tracking-widest text-[#5C5C5C]">
+          Memo Quality
         </span>
-        <span className={`text-lg font-bold tabular-nums ${overallColor(scores.overall)}`}>
+        <span className={`text-[15px] font-medium tabular-nums ${overallColor(scores.overall)}`}>
           {scores.overall.toFixed(1)}{' '}
-          <span className="text-xs font-normal text-gray-500">/ 5.0</span>
+          <span className="text-[12px] font-normal text-[#5C5C5C]">/ 5.0</span>
         </span>
       </div>
 
-      {/* Dimension bars */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2.5">
         {DIMENSIONS.map(({ key, label }) => {
           const value = scores[key]
           const rationale = scores.rationale?.[key]
           return (
             <div key={key} title={rationale ?? ''}>
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-xs text-gray-400 select-none">{label}</span>
-                <span className={`text-xs font-semibold tabular-nums ${barColor(value).replace('bg-', 'text-')}`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[12px] text-[#5C5C5C]">{label}</span>
+                <span className={`text-[12px] font-medium tabular-nums ${scoreTextColor(value)}`}>
                   {value.toFixed(1)}
                 </span>
               </div>
-              <div className="h-1.5 w-full bg-gray-700 rounded-full overflow-hidden">
+              <div className="h-0.5 w-full bg-black/8 overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all duration-500 ${barColor(value)}`}
+                  className={`h-full transition-all duration-500 ${barColor(value)}`}
                   style={{ width: scoreWidth(value) }}
                 />
               </div>
