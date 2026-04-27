@@ -35,6 +35,60 @@ def _load_system_prompt() -> str:
         raise
 
 
+def _fmt(val, suffix="", decimals=1, na="N/A") -> str:
+    """Format a numeric value or return N/A."""
+    if val is None:
+        return na
+    try:
+        return f"{float(val):.{decimals}f}{suffix}"
+    except (TypeError, ValueError):
+        return na
+
+
+def _build_peer_comps_table(ticker: str, data_package: dict, peer_comps: list[dict]) -> str:
+    """Format target + peers as a markdown comparison table."""
+    if not peer_comps:
+        return ""
+
+    header = (
+        "| Company | Ticker | P/E | EV/EBITDA | P/S | Gross Margin | Op. Margin | Rev. Growth |\n"
+        "|---------|--------|-----|-----------|-----|-------------|------------|-------------|\n"
+    )
+
+    def row(name: str, t: str, d: dict, bold: bool = False) -> str:
+        pe    = _fmt(d.get("pe_ratio"), "x")
+        ev    = _fmt(d.get("ev_ebitda"), "x")
+        ps    = _fmt(d.get("ps_ratio"), "x")
+        gm    = _fmt(d.get("gross_margin"), "%")
+        om    = _fmt(d.get("operating_margin"), "%")
+        rg_v  = d.get("revenue_growth_yoy")
+        rg    = (f"{'+' if rg_v >= 0 else ''}{rg_v:.1f}%" if rg_v is not None else "N/A")
+        short = (name or t)[:28]
+        if bold:
+            return f"| **{short}** | **{t}** | **{pe}** | **{ev}** | **{ps}** | **{gm}** | **{om}** | **{rg}** |\n"
+        return f"| {short} | {t} | {pe} | {ev} | {ps} | {gm} | {om} | {rg} |\n"
+
+    # Target row from data_package
+    target_row = row(
+        data_package.get("company_name") or ticker,
+        ticker,
+        data_package,
+        bold=True,
+    )
+
+    peer_rows = "".join(
+        row(p.get("company_name") or p["ticker"], p["ticker"], p)
+        for p in peer_comps
+    )
+
+    return (
+        "\n## Peer Comparison Data\n"
+        "_Use this table to populate Section 5 (Peer Comparison). "
+        "The target company is in bold. All data via Yahoo Finance TTM._\n\n"
+        + header + target_row + peer_rows
+    )
+
+
 def _build_user_message(
     ticker: str,
     strategy: str,
@@ -43,6 +97,7 @@ def _build_user_message(
     research_pack=None,
     bull_case=None,
     bear_case=None,
+    peer_comps: list | None = None,
 ) -> str:
     """
     Build the user message that contains all financial context.
@@ -84,6 +139,9 @@ def _build_user_message(
                 doc_type = excerpt.get("doc_type", "")
                 filing_date = excerpt.get("filing_date", "")
                 base += f"\n**Excerpt {i+1}** ({doc_type}, {filing_date}):\n> {text}\n"
+
+    if peer_comps:
+        base += _build_peer_comps_table(ticker, data_package, peer_comps)
 
     if bull_case is not None:
         bull_text = getattr(bull_case, "full_text", "")
@@ -158,6 +216,7 @@ class MemoWriter:
         research_pack=None,
         bull_case=None,
         bear_case=None,
+        peer_comps: list | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream the memo as text chunks.
@@ -173,6 +232,7 @@ class MemoWriter:
             research_pack=research_pack,
             bull_case=bull_case,
             bear_case=bear_case,
+            peer_comps=peer_comps,
         )
 
         # System prompt with cache_control so it's cached across requests
@@ -216,6 +276,7 @@ class MemoWriter:
         research_pack=None,
         bull_case=None,
         bear_case=None,
+        peer_comps: list | None = None,
     ) -> str:
         """
         Generate a complete memo and return the full markdown text.
@@ -229,6 +290,7 @@ class MemoWriter:
             research_pack=research_pack,
             bull_case=bull_case,
             bear_case=bear_case,
+            peer_comps=peer_comps,
         )
 
         system = [

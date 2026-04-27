@@ -192,18 +192,23 @@ class Orchestrator:
 
         logger.info(f"[Orchestrator] Top pick: {ticker}")
 
-        # 2. Research (multi-turn tool use)
-        logger.info(f"[Orchestrator] Researching {ticker}...")
-        research_pack = await self.researcher.research(
-            ticker=ticker,
-            strategy=strategy,
-            sector=sector,
-            initial_data=data_package,
+        # 2. Research + peer comps in parallel (independent of each other)
+        logger.info(f"[Orchestrator] Researching {ticker} + fetching peer comps...")
+        from services.data_fetcher import get_peer_comps  # noqa: PLC0415
+        research_pack, peer_comps = await asyncio.gather(
+            self.researcher.research(
+                ticker=ticker,
+                strategy=strategy,
+                sector=sector,
+                initial_data=data_package,
+            ),
+            asyncio.to_thread(get_peer_comps, ticker, sector, 5),
         )
         logger.info(
             f"[Orchestrator] Research complete. "
             f"Tools called: {research_pack.tool_calls_made}, "
-            f"SEC excerpts: {len(research_pack.sec_excerpts)}"
+            f"SEC excerpts: {len(research_pack.sec_excerpts)}, "
+            f"Peers: {[p['ticker'] for p in peer_comps]}"
         )
 
         # 3. Bull + Bear in parallel (independent — they don't share context)
@@ -223,6 +228,7 @@ class Orchestrator:
             research_pack=research_pack,
             bull_case=bull_case,
             bear_case=bear_case,
+            peer_comps=peer_comps,
         )
 
         # 5. Combine thinking traces
@@ -361,13 +367,17 @@ class Orchestrator:
                     "score": top["score"],
                 })
 
-            # 2. Research
-            yield _sse({"type": "status", "message": f"Researching {ticker} — fetching financials, SEC filings, news..."})
-            research_pack = await self.researcher.research(
-                ticker=ticker,
-                strategy=strategy,
-                sector=sector,
-                initial_data=data_package,
+            # 2. Research + peer comps in parallel
+            yield _sse({"type": "status", "message": f"Researching {ticker} — fetching financials, SEC filings, peer comps..."})
+            from services.data_fetcher import get_peer_comps  # noqa: PLC0415
+            research_pack, peer_comps = await asyncio.gather(
+                self.researcher.research(
+                    ticker=ticker,
+                    strategy=strategy,
+                    sector=sector,
+                    initial_data=data_package,
+                ),
+                asyncio.to_thread(get_peer_comps, ticker, sector, 5),
             )
             yield _sse({
                 "type": "status",
@@ -375,6 +385,7 @@ class Orchestrator:
                     f"Research complete. "
                     f"Tools used: {', '.join(set(research_pack.tool_calls_made))}. "
                     f"SEC excerpts: {len(research_pack.sec_excerpts)}. "
+                    f"Peers: {', '.join(p['ticker'] for p in peer_comps)}. "
                     "Building bull and bear cases..."
                 ),
             })
@@ -396,6 +407,7 @@ class Orchestrator:
                 research_pack=research_pack,
                 bull_case=bull_case,
                 bear_case=bear_case,
+                peer_comps=peer_comps,
             ):
                 memo_text += chunk
                 yield _sse({"type": "token", "content": chunk})

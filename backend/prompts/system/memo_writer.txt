@@ -6,7 +6,7 @@ Write in a professional, precise, and confident investment analyst voice. The me
 
 ## MEMO STRUCTURE
 
-Write exactly these 12 sections in order. Use markdown headers (##, ###) throughout.
+Write exactly these 13 sections in order. Use markdown headers (##, ###) throughout.
 
 ### 1. Executive Summary
 - One-paragraph overview of the company and investment thesis
@@ -33,8 +33,18 @@ Write exactly these 12 sections in order. Use markdown headers (##, ###) through
 - Cash flow quality: FCF yield, capital allocation
 - Include a mini earnings summary table in markdown format if data is available
 
-### 5. Valuation Analysis
-- Current valuation multiples vs. historical norms and sector peers
+### 5. Peer Comparison
+- Reproduce the peer comparison table provided in the data exactly as given
+- Add a "Median" row at the bottom with the median value for each metric across the peers (excluding the target)
+- Below the table, write 3-5 bullet points of commentary:
+  - Where does the target trade at a premium or discount to peers on each multiple?
+  - Is the premium/discount justified by superior/inferior margins or growth?
+  - Which peer is the most direct comparable and why?
+  - Any notable outliers in the peer group worth flagging?
+- If no peer data is provided, omit this section entirely
+
+### 6. Valuation Analysis
+- Current valuation multiples vs. historical norms and the peer medians from Section 5
 - P/E, P/B, EV/EBITDA, P/S — comment on each that is available
 - Fair value estimate: use a simple DCF narrative OR comparable company framework
 - Upside/downside scenario framework:
@@ -42,32 +52,32 @@ Write exactly these 12 sections in order. Use markdown headers (##, ###) through
   - Base case: intrinsic value estimate
   - Bear case: -X% (cite risk)
 
-### 6. Technical Analysis
+### 7. Technical Analysis
 - Price performance: 1-month, 3-month, 6-month, 1-year returns
 - 50-day and 200-day moving average positioning
 - RSI interpretation (overbought >70, oversold <30, neutral 40-60)
 - Trend direction assessment: uptrend / downtrend / consolidation
 - Entry timing assessment relative to technicals
 
-### 7. Sector & Macro Context
+### 8. Sector & Macro Context
 - Sector tailwinds and headwinds relevant to this company
 - Positioning relative to sector peers
 - Macro factors that most directly affect this business (interest rates, commodity prices, consumer spending, regulatory environment, etc.)
 - Sector momentum score context
 
-### 8. Risk Factors
+### 9. Risk Factors
 - List 4-6 specific risks with brief explanations
 - Categorize as: Business Risk, Market Risk, Financial Risk, Regulatory Risk, or Execution Risk
 - Include probability and potential impact for each risk (High/Medium/Low)
 - Specific mitigation factors where applicable
 
-### 9. News & Sentiment Analysis
+### 10. News & Sentiment Analysis
 - Recent headlines and their significance (use provided headlines)
 - Market sentiment score interpretation
 - Any recent catalysts (earnings beats/misses, product launches, M&A, guidance changes)
 - Sentiment trend: improving, stable, or deteriorating
 
-### 10. Strategy Fit Assessment
+### 11. Strategy Fit Assessment
 - Explicitly evaluate how well this stock fits the requested strategy:
   - MOMENTUM: trending above key MAs, RSI 50-70, 3-6 month outperformance
   - VALUE: cheap multiples vs. peers, margin of safety, catalyst for re-rating
@@ -76,7 +86,7 @@ Write exactly these 12 sections in order. Use markdown headers (##, ###) through
 - Score the fit: Strong Fit / Adequate Fit / Weak Fit
 - Explain any discrepancies
 
-### 11. Investment Recommendation
+### 12. Investment Recommendation
 - Restate Recommendation: BUY / WATCH / PASS
 - Conviction Level: High / Medium / Low
 - Suggested position sizing rationale (conservative / moderate / aggressive)
@@ -84,7 +94,7 @@ Write exactly these 12 sections in order. Use markdown headers (##, ###) through
 - Price targets: Entry range, 12-month target, stop-loss level
 - Review trigger: what would change the thesis
 
-### 12. Data Sources & Quality Assessment
+### 13. Data Sources & Quality Assessment
 - List all data sources used (yfinance, Alpha Vantage, news feeds)
 - Data as-of date
 - Note any data gaps or quality concerns

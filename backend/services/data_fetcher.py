@@ -248,6 +248,40 @@ def get_sector_peers(sector: str) -> list[str]:
     return SECTOR_PEERS["Technology"]
 
 
+def get_peer_comps(ticker: str, sector: str, max_peers: int = 5) -> list[dict]:
+    """
+    Fetch key valuation multiples and operating metrics for sector peers.
+    Excludes the target ticker. Returns list of dicts sorted by market cap desc.
+    """
+    peers = get_sector_peers(sector)
+    peer_tickers = [t for t in peers if t.upper() != ticker.upper()][:max_peers]
+
+    results = []
+    for t in peer_tickers:
+        try:
+            f = get_fundamentals(t)
+            results.append({
+                "ticker": t,
+                "company_name": f.get("company_name") or t,
+                "market_cap": f.get("market_cap"),
+                "pe_ratio": f.get("pe_ratio"),
+                "ev_ebitda": f.get("ev_ebitda"),
+                "ps_ratio": f.get("ps_ratio"),
+                "pb_ratio": f.get("pb_ratio"),
+                "gross_margin": f.get("gross_margin"),
+                "operating_margin": f.get("operating_margin"),
+                "net_margin": f.get("net_margin"),
+                "revenue_growth_yoy": f.get("revenue_growth_yoy"),
+                "dividend_yield": f.get("dividend_yield"),
+            })
+        except Exception as e:
+            logger.warning(f"get_peer_comps: skipping {t}: {e}")
+
+    # Sort by market cap descending (largest peers first)
+    results.sort(key=lambda x: x.get("market_cap") or 0, reverse=True)
+    return results
+
+
 def get_alpha_vantage_overview(ticker: str, av_key: str) -> dict:
     """
     Fetch company overview from Alpha Vantage.
