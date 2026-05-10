@@ -111,56 +111,124 @@ alphalens/
 
 ### Prerequisites
 
-- Python 3.11+
-- Node.js 18+
-- API keys: Anthropic (required), Alpha Vantage (required), SendGrid (optional for email)
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Python | 3.11 – 3.13 | Tested on 3.13 |
+| Node.js | 18+ | |
+| Anthropic API key | — | Required — generates all memos |
+| Alpha Vantage API key | — | Required — free tier (25 req/day) |
+| SendGrid API key | — | Optional — only needed for email delivery |
 
-### Backend Setup
+---
+
+### 1. Clone the repo
 
 ```bash
+git clone https://github.com/SwethaSrinivasan07/AI-Investment-Analyst.git
+cd AI-Investment-Analyst
+```
+
+---
+
+### 2. Backend setup
+
+> **macOS note:** If the repo lives inside an iCloud or OneDrive folder, create the virtual environment *outside* that folder to avoid macOS Gatekeeper blocking execution of synced binaries. The `~/alphalens-venv` path below works for everyone.
+
+```bash
+# Create venv outside any cloud-synced folder
+python3 -m venv ~/alphalens-venv
+source ~/alphalens-venv/bin/activate
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Copy and fill in environment variables
+cp backend/.env.example backend/.env
+# → Edit backend/.env and add your API keys (see table below)
+
+# Initialize the database
 cd backend
-python -m venv venv
-source venv/bin/activate       # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-cp .env.example .env           # Fill in API keys
-
-# Initialize DB
 alembic upgrade head
 
-# Ingest SEC filings into vector store (first run — takes a few minutes)
+# Ingest SEC filings into the vector store (first run only — takes ~3 min)
 python -m services.rag_service --ingest --tickers AAPL,MSFT,ABBV,JPM,XOM
 
 # Start the API server
-uvicorn main:app --reload --port 8000
+~/alphalens-venv/bin/uvicorn main:app --reload --port 8000
 ```
 
-### Frontend Setup
+You should see `Application startup complete.` in the terminal.
+
+---
+
+### 3. Frontend setup
 
 ```bash
 cd frontend
 npm install
-cp .env.local.example .env.local   # Set NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# macOS only — clear Gatekeeper quarantine on native binaries
+xattr -rd com.apple.quarantine node_modules
+
+cp .env.local.example .env.local
+# → .env.local is pre-filled correctly; no changes needed for local dev
+
 npm run dev
-# Open http://localhost:3000
+# → Open http://localhost:3000
 ```
 
-### Environment Variables
+> **Port conflict?** If port 3000 is taken, find and kill the occupying process first:
+> ```bash
+> lsof -ti :3000 | xargs kill
+> ```
+> The backend CORS config expects port 3000. If you run the frontend on a different port, update `FRONTEND_URL` in `backend/.env` to match.
 
-**Backend `.env`:**
-```
-ANTHROPIC_API_KEY=sk-ant-...
-ALPHA_VANTAGE_API_KEY=...
-SENDGRID_API_KEY=...
-JWT_SECRET=your-secret-here
-DATABASE_URL=sqlite:///./alphalens.db
-CHROMA_PERSIST_PATH=./chroma_db
-```
+---
 
-**Frontend `.env.local`:**
+### 4. Environment variables
+
+**`backend/.env`** (copy from `.env.example`):
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | ✅ | Your Anthropic API key (`sk-ant-...`) |
+| `ALPHA_VANTAGE_API_KEY` | ✅ | Free key from alphavantage.co |
+| `SENDGRID_API_KEY` | Optional | Only needed for scheduled email delivery |
+| `JWT_SECRET` | ✅ | Any random 32+ character string |
+| `DATABASE_URL` | ✅ | Default: `sqlite+aiosqlite:///./alphalens.db` |
+| `CHROMA_PERSIST_PATH` | ✅ | Default: `./chroma_db` |
+| `FRONTEND_URL` | ✅ | Default: `http://localhost:3000` |
+| `THINKING_BUDGET` | — | Tokens for extended thinking. `0` = off (~$0.08/memo), `1024` = default (~$0.18/memo), `5000` = full (~$0.37/memo) |
+| `RESEARCH_MAX_TURNS` | — | Tool-use turns for Research Agent. Default: `5` |
+
+**`frontend/.env.local`** (copy from `.env.local.example`):
+
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
+
+---
+
+### 5. Generate your first memo
+
+1. Sign up at `http://localhost:3000/auth/signup`
+2. Go to **Settings** and choose a strategy (e.g. Value) and sector (e.g. Healthcare)
+3. Click **Generate Memo** on the Dashboard
+4. Watch the memo stream in — the thinking trace, peer comparison table, and source citations will appear as it completes
+
+---
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `operation not permitted: venv/bin/uvicorn` | macOS Gatekeeper blocking synced binary | Create venv at `~/alphalens-venv` (outside OneDrive/iCloud) |
+| `Failed to load SWC binary` on `npm run dev` | Gatekeeper quarantined node_modules | Run `xattr -rd com.apple.quarantine node_modules` in `frontend/` |
+| `Failed to fetch` on login | CORS mismatch — frontend port ≠ `FRONTEND_URL` | Kill whatever is on port 3000 (`lsof -ti :3000 \| xargs kill`) and restart frontend |
+| `OPTIONS ... 400 Bad Request` in backend logs | Same CORS mismatch | Same fix as above |
+| `Connection error during generation` in SSE | JWT token expired (7-day TTL) | Log out and log back in |
+| `Could not import module "main"` | Wrong working directory | Make sure you `cd backend` before running uvicorn |
+| Alpha Vantage data missing | 25 req/day free tier exhausted | Data falls back to yfinance automatically; wait until next day for AV cache to refresh |
 
 ---
 
