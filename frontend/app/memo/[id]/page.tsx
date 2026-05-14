@@ -4,6 +4,13 @@ import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { getMemo, clearToken, type Memo } from '@/lib/api'
+
+// Required for Next.js static export with dynamic routes.
+// Memo IDs are only known at runtime, so we return [] here and rely on
+// client-side routing + the Cloudflare Pages _redirects SPA fallback.
+export function generateStaticParams() {
+  return []
+}
 import MemoDetail from '@/components/MemoDetail'
 import ChatPanel from '@/components/ChatPanel'
 import ThinkingTrace from '@/components/ThinkingTrace'
