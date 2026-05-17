@@ -135,6 +135,13 @@ async def get_current_user_sse(
 
 @router.post("/register", response_model=TokenResponse)
 async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
+    # Restrict signups to Stanford email addresses only
+    if not user_in.email.lower().endswith("@stanford.edu"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sign-up is restricted to Stanford email addresses (@stanford.edu).",
+        )
+
     # Check if email already exists
     result = await db.execute(select(User).where(User.email == user_in.email.lower()))
     existing = result.scalar_one_or_none()
