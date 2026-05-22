@@ -156,12 +156,18 @@ export async function getMemo(id: string): Promise<Memo> {
 export async function generateMemo(
   strategy: string,
   sector: string,
-  numPicks?: number
+  numPicks?: number,
+  ticker?: string,
 ): Promise<Memo> {
   const res = await fetch(`${API_URL}/api/memos/generate`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ strategy, sector, ...(numPicks != null ? { num_picks: numPicks } : {}) }),
+    body: JSON.stringify({
+      strategy,
+      sector,
+      ...(numPicks != null ? { num_picks: numPicks } : {}),
+      ...(ticker ? { ticker } : {}),
+    }),
   })
   return handleResponse<Memo>(res)
 }

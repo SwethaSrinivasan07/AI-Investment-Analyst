@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { streamMemoGeneration } from '@/lib/api'
+import { generateMemo } from '@/lib/api'
 
 interface GenerateMemoModalProps {
   onClose: () => void
@@ -58,7 +58,7 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
     pickMode === 'auto' ? selectedSector !== null : tickerInput.trim().length >= 1
   )
 
-  function handleGenerate() {
+  async function handleGenerate() {
     if (!canGenerate || !selectedStrategy) return
 
     setPhase('screening')
@@ -68,51 +68,24 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
     const sector = pickMode === 'auto' ? (selectedSector as string) : 'Auto'
     const ticker = pickMode === 'specific' ? tickerInput.trim().toUpperCase() : undefined
 
-    const es = streamMemoGeneration(strategy, sector, ticker)
-    eventSourceRef.current = es
+    // Animate through phases while waiting for the non-streaming response
+    const phaseTimer1 = setTimeout(() => setPhase('fetching'), 3000)
+    const phaseTimer2 = setTimeout(() => setPhase('writing'), 10000)
 
-    let dotTimer: ReturnType<typeof setTimeout> | null = null
-
-    function advancePhase() {
-      setPhase((current) => {
-        if (current === 'screening') return 'fetching'
-        if (current === 'fetching') return 'writing'
-        return current
-      })
-      dotTimer = setTimeout(advancePhase, 4000)
+    try {
+      const memo = await generateMemo(strategy, sector, undefined, ticker)
+      clearTimeout(phaseTimer1); clearTimeout(phaseTimer2)
+      setPhase('done')
+      router.push(`/memo/${memo.id}`)
+      onClose()
+    } catch (err: unknown) {
+      clearTimeout(phaseTimer1); clearTimeout(phaseTimer2)
+      setPhase('error')
+      const msg = err instanceof Error ? err.message : 'Generation failed'
+      setErrorMessage(msg.includes('500') || msg.includes('failed')
+        ? 'Generation failed on the server. Please try again.'
+        : 'Connection error during generation. Please try again.')
     }
-
-    dotTimer = setTimeout(advancePhase, 3000)
-
-    es.addEventListener('message', (e: MessageEvent<string>) => {
-      try {
-        const parsed = JSON.parse(e.data) as { type: string; memo_id?: string; phase?: string }
-        if (parsed.type === 'done' && parsed.memo_id) {
-          if (dotTimer) clearTimeout(dotTimer)
-          es.close(); setPhase('done')
-          router.push(`/memo/${parsed.memo_id}`)
-          onClose()
-        } else if (parsed.type === 'phase' && parsed.phase) {
-          const phaseMap: Record<string, GenerationPhase> = {
-            screening: 'screening', fetching: 'fetching', writing: 'writing',
-          }
-          if (phaseMap[parsed.phase]) {
-            if (dotTimer) clearTimeout(dotTimer)
-            setPhase(phaseMap[parsed.phase])
-          }
-        } else if (parsed.type === 'error') {
-          if (dotTimer) clearTimeout(dotTimer)
-          es.close(); setPhase('error')
-          setErrorMessage('Generation failed on the server. Please try again.')
-        }
-      } catch { /* ignore malformed */ }
-    })
-
-    es.addEventListener('error', () => {
-      if (dotTimer) clearTimeout(dotTimer)
-      es.close(); setPhase('error')
-      setErrorMessage('Connection error during generation. Please try again.')
-    })
   }
 
   return (
