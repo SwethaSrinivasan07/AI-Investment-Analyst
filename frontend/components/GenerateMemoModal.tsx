@@ -70,6 +70,7 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
 
     const es = streamMemoGeneration(strategy, sector, ticker)
     eventSourceRef.current = es
+    let doneReceived = false  // guard: don't let onerror override a successful done
 
     es.onmessage = (event: MessageEvent) => {
       try {
@@ -83,7 +84,9 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
           conviction?: string
         }
 
-        if (data.type === 'status') {
+        if (data.type === 'ping') {
+          // keepalive — ignore
+        } else if (data.type === 'status') {
           const msg = (data.message ?? '').toLowerCase()
           if (msg.includes('screen')) setPhase('screening')
           else if (msg.includes('fetch') || msg.includes('research') || msg.includes('bull') || msg.includes('bear') || msg.includes('peer')) setPhase('fetching')
@@ -91,6 +94,7 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
         } else if (data.type === 'token') {
           setPhase('writing')
         } else if (data.type === 'done') {
+          doneReceived = true
           es.close()
           setPhase('done')
           if (data.memo_id) {
@@ -108,6 +112,7 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
     }
 
     es.onerror = () => {
+      if (doneReceived) return  // stream closed naturally after done — not an error
       es.close()
       setPhase('error')
       setErrorMessage('Connection error during generation. Please try again.')

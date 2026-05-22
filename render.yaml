@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ai-investment-analyst
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: FAST_MODE
+        value: "true"
+    # Only redeploy when backend files change — prevents frontend pushes
+    # (Vercel handles those) from restarting the backend and wiping SQLite.
+    includePaths:
+      - backend/**
+      - render.yaml

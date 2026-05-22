@@ -7,6 +7,7 @@ Memo API endpoints:
 - DELETE /api/memos/{id}         — delete memo
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -141,15 +142,45 @@ async def generate_memo_stream(
     strategy = _validate_strategy(strategy)
 
     async def event_generator():
-        async for chunk in _orchestrator.run_streaming(
-            user_id=current_user.id,
-            strategy=strategy,
-            sector=sector,
-            num_picks=1,
-            ticker=ticker,
-            db=db,
-        ):
-            yield chunk
+        """
+        Wraps run_streaming with a keepalive task that sends SSE pings every
+        25 seconds. This prevents Render / nginx / browser from closing the
+        connection during the long bull+bear agent phase (~60-120 s of silence).
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _pipeline() -> None:
+            try:
+                async for chunk in _orchestrator.run_streaming(
+                    user_id=current_user.id,
+                    strategy=strategy,
+                    sector=sector,
+                    num_picks=1,
+                    ticker=ticker,
+                    db=db,
+                ):
+                    await queue.put(chunk)
+            finally:
+                await queue.put(None)  # sentinel — signals the generator to stop
+
+        async def _keepalive() -> None:
+            ping = f"data: {json.dumps({'type': 'ping'})}\n\n"
+            while True:
+                await asyncio.sleep(25)
+                await queue.put(ping)
+
+        pipeline_task = asyncio.create_task(_pipeline())
+        keepalive_task = asyncio.create_task(_keepalive())
+
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            keepalive_task.cancel()
+            pipeline_task.cancel()
 
     return StreamingResponse(
         event_generator(),
