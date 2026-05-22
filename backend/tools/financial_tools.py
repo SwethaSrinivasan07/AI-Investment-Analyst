@@ -145,11 +145,18 @@ async def execute_tool(tool_name: str, tool_input: dict) -> str:
     try:
         if tool_name == "get_price_history":
             from services.data_fetcher import get_price_history
-            result = await asyncio.to_thread(
-                get_price_history,
-                tool_input["ticker"],
-                tool_input.get("period", "1y"),
-            )
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        get_price_history,
+                        tool_input["ticker"],
+                        tool_input.get("period", "1y"),
+                    ),
+                    timeout=20,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"get_price_history timed out for {tool_input.get('ticker')}")
+                result = {}
             # Omit the full OHLCV records to keep context size manageable
             result_summary = {k: v for k, v in result.items() if k != "data"}
             result_summary["num_data_points"] = len(result.get("data", []))
@@ -157,7 +164,14 @@ async def execute_tool(tool_name: str, tool_input: dict) -> str:
 
         elif tool_name == "get_fundamentals":
             from services.data_fetcher import get_fundamentals
-            result = await asyncio.to_thread(get_fundamentals, tool_input["ticker"])
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(get_fundamentals, tool_input["ticker"]),
+                    timeout=20,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"get_fundamentals timed out for {tool_input.get('ticker')}")
+                result = {"ticker": tool_input["ticker"], "note": "Data temporarily unavailable"}
             return json.dumps(result, default=str)
 
         elif tool_name == "search_sec_filings":
@@ -187,7 +201,14 @@ async def execute_tool(tool_name: str, tool_input: dict) -> str:
 
         elif tool_name == "get_news_sentiment":
             from services.data_fetcher import get_news_sentiment
-            result = await asyncio.to_thread(get_news_sentiment, tool_input["ticker"])
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(get_news_sentiment, tool_input["ticker"]),
+                    timeout=20,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"get_news_sentiment timed out for {tool_input.get('ticker')}")
+                result = {"headlines": [], "sentiment_score": 0}
             return json.dumps(result, default=str)
 
         elif tool_name == "get_sector_context":
@@ -202,7 +223,9 @@ async def execute_tool(tool_name: str, tool_input: dict) -> str:
             peer_data: list[dict[str, Any]] = []
             for peer in sample:
                 try:
-                    fd = await asyncio.to_thread(get_fundamentals, peer)
+                    fd = await asyncio.wait_for(
+                        asyncio.to_thread(get_fundamentals, peer), timeout=20
+                    )
                     peer_data.append({
                         "ticker": peer,
                         "pe_ratio": fd.get("pe_ratio"),
