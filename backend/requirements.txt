@@ -18,8 +18,9 @@ pydantic-settings>=2.3.0
 pandas>=2.2.3
 numpy>=1.26.4
 scipy>=1.14.0
-chromadb>=1.0.0
-sentence-transformers==2.6.1
+# chromadb and sentence-transformers are optional (RAG feature).
+# Excluded here because they exceed Render's 512MB free-tier RAM limit.
+# Install locally with: pip install chromadb>=1.0.0 sentence-transformers==2.6.1
 APScheduler==3.10.4
 sendgrid==6.11.0
 pytest==8.1.0

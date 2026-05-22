@@ -116,12 +116,10 @@ async def generate_memo(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        import traceback
-        err_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
-        logger.error(f"generate_memo error: {err_detail}")
+        logger.error(f"generate_memo error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=err_detail,
+            detail="Memo generation failed. Please try again.",
         )
 
     return MemoResponse.model_validate(memo)

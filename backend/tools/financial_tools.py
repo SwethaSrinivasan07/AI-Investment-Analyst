@@ -161,22 +161,29 @@ async def execute_tool(tool_name: str, tool_input: dict) -> str:
             return json.dumps(result, default=str)
 
         elif tool_name == "search_sec_filings":
-            from services.rag_service import get_rag_service
-            rag = get_rag_service()
-            ticker = tool_input["ticker"]
+            try:
+                from services.rag_service import get_rag_service
+                rag = get_rag_service()
+                ticker = tool_input["ticker"]
 
-            # Ensure ticker is ingested first
-            if not rag.is_ingested(ticker):
-                logger.info(f"Triggering ingestion for {ticker} before search")
-                await asyncio.to_thread(rag.ingest_ticker, ticker)
+                # Ensure ticker is ingested first
+                if not rag.is_ingested(ticker):
+                    logger.info(f"Triggering ingestion for {ticker} before search")
+                    await asyncio.to_thread(rag.ingest_ticker, ticker)
 
-            results = await asyncio.to_thread(
-                rag.search,
-                ticker,
-                tool_input["query"],
-                tool_input.get("top_k", 4),
-            )
-            return json.dumps(results, default=str)
+                results = await asyncio.to_thread(
+                    rag.search,
+                    ticker,
+                    tool_input["query"],
+                    tool_input.get("top_k", 4),
+                )
+                return json.dumps(results, default=str)
+            except Exception as rag_err:
+                logger.warning(f"RAG unavailable (skipping SEC filings search): {rag_err}")
+                return json.dumps({
+                    "results": [],
+                    "note": "SEC filing search unavailable in this environment. Use other tools for research."
+                })
 
         elif tool_name == "get_news_sentiment":
             from services.data_fetcher import get_news_sentiment
