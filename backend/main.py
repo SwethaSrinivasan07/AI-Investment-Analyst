@@ -65,7 +65,16 @@ app = FastAPI(
 # FRONTEND_URL may be a single URL or a comma-separated list, e.g.:
 #   https://alphalens.pages.dev,http://localhost:3000
 # ---------------------------------------------------------------------------
-_allowed_origins = [o.strip() for o in settings.frontend_url.split(",") if o.strip()]
+# Always include the production Vercel URL + localhost for dev
+_ALWAYS_ALLOWED = [
+    "https://ai-investment-analyst-blond.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
+_allowed_origins = list({
+    *_ALWAYS_ALLOWED,
+    *[o.strip() for o in settings.frontend_url.split(",") if o.strip()],
+})
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
