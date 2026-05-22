@@ -344,6 +344,23 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
 
     except Exception as e:
         logger.warning(f"get_price_history({ticker}) failed ({type(e).__name__}): {e}")
+        # Try Alpha Vantage GLOBAL_QUOTE as a minimal price fallback
+        try:
+            from models.database import settings as _s
+            if _s.alpha_vantage_api_key:
+                resp = requests.get(
+                    "https://www.alphavantage.co/query",
+                    params={"function": "GLOBAL_QUOTE", "symbol": ticker, "apikey": _s.alpha_vantage_api_key},
+                    timeout=8,
+                )
+                q = resp.json().get("Global Quote", {})
+                if q.get("05. price"):
+                    price = float(q["05. price"])
+                    chg_pct = float(q.get("10. change percent", "0").rstrip("%"))
+                    return {**_empty, "current_price": round(price, 2),
+                            "price_change_1d_pct": round(chg_pct, 2), "note": "Price via Alpha Vantage"}
+        except Exception as av_e:
+            logger.warning(f"AV price fallback also failed for {ticker}: {av_e}")
         return _empty
 
 
