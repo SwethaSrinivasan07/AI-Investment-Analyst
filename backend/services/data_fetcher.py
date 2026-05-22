@@ -5,6 +5,7 @@ All functions are synchronous — call them via asyncio.to_thread() from async c
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -14,6 +15,185 @@ import requests
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-memory Alpha Vantage cache (avoids burning 25 req/day on repeated calls)
+# Key: ticker, Value: (data_dict, unix_timestamp_fetched)
+# TTL: 23 hours so we never hit the 25/day wall within a server session
+# ---------------------------------------------------------------------------
+_AV_MEMORY_CACHE: dict[str, tuple[dict, float]] = {}
+_AV_CACHE_TTL_SECONDS = 23 * 3600  # 23 hours
+
+
+# ---------------------------------------------------------------------------
+# Static fundamentals fallback (last-resort when yfinance AND AV both fail)
+# Values are approximate trailing-twelve-month figures sourced from public
+# financial data. Used only when live data is unavailable.
+# ---------------------------------------------------------------------------
+_STATIC_FUNDAMENTALS: dict[str, dict] = {
+    "AAPL": dict(company_name="Apple Inc.", sector="Technology", industry="Consumer Electronics",
+                 market_cap=3_050_000_000_000, pe_ratio=33.0, forward_pe=28.5, pb_ratio=49.0,
+                 ps_ratio=8.1, ev_ebitda=24.0, dividend_yield=0.5, payout_ratio=15.0,
+                 beta=1.2, eps=7.02, revenue_ttm=398_000_000_000, revenue_growth_yoy=5.1,
+                 gross_margin=46.2, operating_margin=31.0, net_margin=24.3, debt_to_equity=175.0,
+                 current_ratio=0.9, fcf_yield=3.8),
+    "MSFT": dict(company_name="Microsoft Corporation", sector="Technology", industry="Software—Infrastructure",
+                 market_cap=3_300_000_000_000, pe_ratio=35.0, forward_pe=29.0, pb_ratio=13.0,
+                 ps_ratio=13.5, ev_ebitda=27.5, dividend_yield=0.7, payout_ratio=25.0,
+                 beta=0.9, eps=13.50, revenue_ttm=245_000_000_000, revenue_growth_yoy=16.0,
+                 gross_margin=70.1, operating_margin=44.2, net_margin=35.0, debt_to_equity=38.0,
+                 current_ratio=1.3, fcf_yield=2.8),
+    "NVDA": dict(company_name="NVIDIA Corporation", sector="Technology", industry="Semiconductors",
+                 market_cap=3_600_000_000_000, pe_ratio=33.5, forward_pe=22.0, pb_ratio=36.0,
+                 ps_ratio=19.0, ev_ebitda=42.0, dividend_yield=0.03, payout_ratio=1.0,
+                 beta=1.7, eps=2.99, revenue_ttm=130_000_000_000, revenue_growth_yoy=122.0,
+                 gross_margin=65.5, operating_margin=56.0, net_margin=53.0, debt_to_equity=12.0,
+                 current_ratio=4.2, fcf_yield=2.5),
+    "GOOGL": dict(company_name="Alphabet Inc.", sector="Communication Services", industry="Internet Content & Information",
+                  market_cap=2_200_000_000_000, pe_ratio=21.5, forward_pe=17.5, pb_ratio=7.5,
+                  ps_ratio=7.2, ev_ebitda=16.5, dividend_yield=0.5, payout_ratio=8.0,
+                  beta=1.1, eps=8.84, revenue_ttm=355_000_000_000, revenue_growth_yoy=14.0,
+                  gross_margin=57.5, operating_margin=31.5, net_margin=24.0, debt_to_equity=5.0,
+                  current_ratio=1.9, fcf_yield=4.5),
+    "GOOG": dict(company_name="Alphabet Inc.", sector="Communication Services", industry="Internet Content & Information",
+                 market_cap=2_200_000_000_000, pe_ratio=21.5, forward_pe=17.5, pb_ratio=7.5,
+                 ps_ratio=7.2, ev_ebitda=16.5, dividend_yield=0.5, payout_ratio=8.0,
+                 beta=1.1, eps=8.84, revenue_ttm=355_000_000_000, revenue_growth_yoy=14.0,
+                 gross_margin=57.5, operating_margin=31.5, net_margin=24.0, debt_to_equity=5.0,
+                 current_ratio=1.9, fcf_yield=4.5),
+    "META": dict(company_name="Meta Platforms Inc.", sector="Communication Services", industry="Internet Content & Information",
+                 market_cap=1_700_000_000_000, pe_ratio=25.0, forward_pe=20.5, pb_ratio=9.5,
+                 ps_ratio=9.0, ev_ebitda=18.5, dividend_yield=0.3, payout_ratio=7.0,
+                 beta=1.2, eps=23.0, revenue_ttm=165_000_000_000, revenue_growth_yoy=22.0,
+                 gross_margin=81.0, operating_margin=42.0, net_margin=35.0, debt_to_equity=11.0,
+                 current_ratio=2.7, fcf_yield=3.5),
+    "AMZN": dict(company_name="Amazon.com Inc.", sector="Consumer Discretionary", industry="Internet Retail",
+                 market_cap=2_400_000_000_000, pe_ratio=40.0, forward_pe=28.0, pb_ratio=10.0,
+                 ps_ratio=4.0, ev_ebitda=22.0, dividend_yield=0.0, payout_ratio=0.0,
+                 beta=1.1, eps=5.53, revenue_ttm=640_000_000_000, revenue_growth_yoy=11.0,
+                 gross_margin=48.0, operating_margin=10.5, net_margin=8.0, debt_to_equity=50.0,
+                 current_ratio=1.1, fcf_yield=2.5),
+    "TSLA": dict(company_name="Tesla Inc.", sector="Consumer Discretionary", industry="Auto Manufacturers",
+                 market_cap=920_000_000_000, pe_ratio=95.0, forward_pe=58.0, pb_ratio=12.0,
+                 ps_ratio=8.5, ev_ebitda=52.0, dividend_yield=0.0, payout_ratio=0.0,
+                 beta=2.3, eps=1.81, revenue_ttm=100_000_000_000, revenue_growth_yoy=1.0,
+                 gross_margin=17.5, operating_margin=6.0, net_margin=5.0, debt_to_equity=8.0,
+                 current_ratio=1.8, fcf_yield=0.8),
+    "AVGO": dict(company_name="Broadcom Inc.", sector="Technology", industry="Semiconductors",
+                 market_cap=1_100_000_000_000, pe_ratio=28.0, forward_pe=22.5, pb_ratio=14.0,
+                 ps_ratio=10.5, ev_ebitda=26.0, dividend_yield=1.2, payout_ratio=30.0,
+                 beta=1.1, eps=5.12, revenue_ttm=55_000_000_000, revenue_growth_yoy=44.0,
+                 gross_margin=64.0, operating_margin=45.0, net_margin=28.0, debt_to_equity=100.0,
+                 current_ratio=1.1, fcf_yield=4.2),
+    "CRM": dict(company_name="Salesforce Inc.", sector="Technology", industry="Software—Application",
+                market_cap=320_000_000_000, pe_ratio=30.0, forward_pe=25.0, pb_ratio=4.5,
+                ps_ratio=7.5, ev_ebitda=22.0, dividend_yield=0.6, payout_ratio=15.0,
+                beta=1.1, eps=9.85, revenue_ttm=38_000_000_000, revenue_growth_yoy=9.0,
+                gross_margin=76.0, operating_margin=18.0, net_margin=14.0, debt_to_equity=25.0,
+                current_ratio=1.0, fcf_yield=4.0),
+    "ADBE": dict(company_name="Adobe Inc.", sector="Technology", industry="Software—Application",
+                 market_cap=190_000_000_000, pe_ratio=28.0, forward_pe=22.0, pb_ratio=12.0,
+                 ps_ratio=8.5, ev_ebitda=20.0, dividend_yield=0.0, payout_ratio=0.0,
+                 beta=1.0, eps=18.0, revenue_ttm=22_000_000_000, revenue_growth_yoy=10.0,
+                 gross_margin=88.0, operating_margin=34.0, net_margin=26.0, debt_to_equity=88.0,
+                 current_ratio=1.1, fcf_yield=4.0),
+    # Healthcare
+    "LLY": dict(company_name="Eli Lilly and Company", sector="Healthcare", industry="Drug Manufacturers—General",
+                market_cap=850_000_000_000, pe_ratio=50.0, forward_pe=32.0, pb_ratio=70.0,
+                ps_ratio=20.0, ev_ebitda=42.0, dividend_yield=0.6, payout_ratio=25.0,
+                beta=0.4, eps=13.5, revenue_ttm=47_000_000_000, revenue_growth_yoy=32.0,
+                gross_margin=80.5, operating_margin=30.5, net_margin=26.0, debt_to_equity=185.0,
+                current_ratio=1.2, fcf_yield=2.0),
+    "JNJ": dict(company_name="Johnson & Johnson", sector="Healthcare", industry="Drug Manufacturers—General",
+                market_cap=380_000_000_000, pe_ratio=16.0, forward_pe=14.0, pb_ratio=5.0,
+                ps_ratio=5.0, ev_ebitda=14.0, dividend_yield=3.1, payout_ratio=45.0,
+                beta=0.5, eps=5.79, revenue_ttm=89_000_000_000, revenue_growth_yoy=4.0,
+                gross_margin=69.0, operating_margin=20.0, net_margin=14.0, debt_to_equity=55.0,
+                current_ratio=1.3, fcf_yield=5.0),
+    "ABBV": dict(company_name="AbbVie Inc.", sector="Healthcare", industry="Drug Manufacturers—General",
+                 market_cap=325_000_000_000, pe_ratio=20.0, forward_pe=16.0, pb_ratio=12.0,
+                 ps_ratio=4.5, ev_ebitda=15.0, dividend_yield=3.4, payout_ratio=65.0,
+                 beta=0.7, eps=11.1, revenue_ttm=58_000_000_000, revenue_growth_yoy=4.0,
+                 gross_margin=70.0, operating_margin=22.0, net_margin=17.0, debt_to_equity=405.0,
+                 current_ratio=0.9, fcf_yield=5.5),
+    "MRK": dict(company_name="Merck & Co. Inc.", sector="Healthcare", industry="Drug Manufacturers—General",
+                market_cap=280_000_000_000, pe_ratio=15.0, forward_pe=12.0, pb_ratio=4.5,
+                ps_ratio=3.5, ev_ebitda=11.0, dividend_yield=2.9, payout_ratio=40.0,
+                beta=0.4, eps=7.82, revenue_ttm=63_000_000_000, revenue_growth_yoy=7.0,
+                gross_margin=73.0, operating_margin=28.0, net_margin=17.0, debt_to_equity=80.0,
+                current_ratio=1.3, fcf_yield=6.0),
+    "TMO": dict(company_name="Thermo Fisher Scientific", sector="Healthcare", industry="Diagnostics & Research",
+                market_cap=205_000_000_000, pe_ratio=28.0, forward_pe=23.0, pb_ratio=5.0,
+                ps_ratio=4.5, ev_ebitda=19.0, dividend_yield=0.3, payout_ratio=8.0,
+                beta=0.7, eps=22.0, revenue_ttm=43_000_000_000, revenue_growth_yoy=-2.0,
+                gross_margin=42.0, operating_margin=18.0, net_margin=14.0, debt_to_equity=70.0,
+                current_ratio=1.8, fcf_yield=3.5),
+    # Financials
+    "JPM": dict(company_name="JPMorgan Chase & Co.", sector="Financials", industry="Banks—Diversified",
+                market_cap=750_000_000_000, pe_ratio=13.0, forward_pe=12.0, pb_ratio=2.2,
+                ps_ratio=3.5, ev_ebitda=None, dividend_yield=2.2, payout_ratio=28.0,
+                beta=1.2, eps=19.0, revenue_ttm=175_000_000_000, revenue_growth_yoy=10.0,
+                gross_margin=None, operating_margin=37.0, net_margin=27.0, debt_to_equity=None,
+                current_ratio=None, fcf_yield=None),
+    "BAC": dict(company_name="Bank of America Corp.", sector="Financials", industry="Banks—Diversified",
+                market_cap=360_000_000_000, pe_ratio=14.0, forward_pe=12.5, pb_ratio=1.5,
+                ps_ratio=2.5, ev_ebitda=None, dividend_yield=2.4, payout_ratio=32.0,
+                beta=1.4, eps=3.39, revenue_ttm=100_000_000_000, revenue_growth_yoy=5.0,
+                gross_margin=None, operating_margin=25.0, net_margin=21.0, debt_to_equity=None,
+                current_ratio=None, fcf_yield=None),
+    "GS": dict(company_name="Goldman Sachs Group Inc.", sector="Financials", industry="Capital Markets",
+               market_cap=210_000_000_000, pe_ratio=14.0, forward_pe=12.0, pb_ratio=1.7,
+               ps_ratio=2.0, ev_ebitda=None, dividend_yield=2.2, payout_ratio=28.0,
+               beta=1.5, eps=42.0, revenue_ttm=60_000_000_000, revenue_growth_yoy=16.0,
+               gross_margin=None, operating_margin=30.0, net_margin=24.0, debt_to_equity=None,
+               current_ratio=None, fcf_yield=None),
+    "V": dict(company_name="Visa Inc.", sector="Financials", industry="Credit Services",
+              market_cap=620_000_000_000, pe_ratio=30.0, forward_pe=25.5, pb_ratio=14.0,
+              ps_ratio=16.0, ev_ebitda=22.0, dividend_yield=0.8, payout_ratio=22.0,
+              beta=0.9, eps=10.5, revenue_ttm=37_000_000_000, revenue_growth_yoy=10.0,
+              gross_margin=80.0, operating_margin=66.0, net_margin=53.0, debt_to_equity=140.0,
+              current_ratio=1.5, fcf_yield=3.5),
+    # Energy
+    "XOM": dict(company_name="Exxon Mobil Corp.", sector="Energy", industry="Oil & Gas Integrated",
+                market_cap=520_000_000_000, pe_ratio=14.0, forward_pe=12.5, pb_ratio=2.0,
+                ps_ratio=1.4, ev_ebitda=8.0, dividend_yield=3.5, payout_ratio=45.0,
+                beta=0.9, eps=8.38, revenue_ttm=390_000_000_000, revenue_growth_yoy=-5.0,
+                gross_margin=32.0, operating_margin=13.0, net_margin=9.0, debt_to_equity=18.0,
+                current_ratio=1.4, fcf_yield=7.0),
+    "CVX": dict(company_name="Chevron Corporation", sector="Energy", industry="Oil & Gas Integrated",
+                market_cap=285_000_000_000, pe_ratio=14.5, forward_pe=13.0, pb_ratio=1.8,
+                ps_ratio=1.4, ev_ebitda=7.5, dividend_yield=4.2, payout_ratio=55.0,
+                beta=0.8, eps=10.7, revenue_ttm=195_000_000_000, revenue_growth_yoy=-8.0,
+                gross_margin=35.0, operating_margin=14.0, net_margin=10.0, debt_to_equity=15.0,
+                current_ratio=1.3, fcf_yield=8.0),
+    # Consumer Staples
+    "WMT": dict(company_name="Walmart Inc.", sector="Consumer Staples", industry="Discount Stores",
+                market_cap=780_000_000_000, pe_ratio=32.0, forward_pe=27.0, pb_ratio=8.5,
+                ps_ratio=1.0, ev_ebitda=18.0, dividend_yield=1.0, payout_ratio=30.0,
+                beta=0.5, eps=2.45, revenue_ttm=680_000_000_000, revenue_growth_yoy=5.0,
+                gross_margin=24.4, operating_margin=4.5, net_margin=2.9, debt_to_equity=80.0,
+                current_ratio=0.8, fcf_yield=3.0),
+    "COST": dict(company_name="Costco Wholesale Corp.", sector="Consumer Staples", industry="Discount Stores",
+                 market_cap=440_000_000_000, pe_ratio=55.0, forward_pe=47.0, pb_ratio=15.0,
+                 ps_ratio=1.5, ev_ebitda=32.0, dividend_yield=0.6, payout_ratio=28.0,
+                 beta=0.7, eps=18.0, revenue_ttm=248_000_000_000, revenue_growth_yoy=8.0,
+                 gross_margin=12.5, operating_margin=4.2, net_margin=3.0, debt_to_equity=45.0,
+                 current_ratio=1.0, fcf_yield=2.0),
+    # Industrials
+    "CAT": dict(company_name="Caterpillar Inc.", sector="Industrials", industry="Farm & Heavy Construction Machinery",
+                market_cap=195_000_000_000, pe_ratio=16.0, forward_pe=14.5, pb_ratio=12.0,
+                ps_ratio=2.5, ev_ebitda=13.0, dividend_yield=1.6, payout_ratio=24.0,
+                beta=1.1, eps=21.0, revenue_ttm=65_000_000_000, revenue_growth_yoy=-4.0,
+                gross_margin=37.0, operating_margin=19.0, net_margin=15.0, debt_to_equity=170.0,
+                current_ratio=1.4, fcf_yield=6.0),
+    # Real Estate / Utilities
+    "NEE": dict(company_name="NextEra Energy Inc.", sector="Utilities", industry="Utilities—Regulated Electric",
+                market_cap=155_000_000_000, pe_ratio=18.0, forward_pe=16.0, pb_ratio=2.9,
+                ps_ratio=5.0, ev_ebitda=14.0, dividend_yield=3.0, payout_ratio=55.0,
+                beta=0.6, eps=3.55, revenue_ttm=24_000_000_000, revenue_growth_yoy=7.0,
+                gross_margin=42.0, operating_margin=25.0, net_margin=15.0, debt_to_equity=180.0,
+                current_ratio=0.6, fcf_yield=None),
+}
 
 # ---------------------------------------------------------------------------
 # Sector peer universe (S&P 500 major tickers per sector)
@@ -158,20 +338,32 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
 def get_fundamentals(ticker: str) -> dict:
     """
     Returns key fundamental metrics.
-    Primary source: yfinance. Falls back to Alpha Vantage when yfinance
-    returns empty data (common on cloud IPs that are rate-limited).
+    Source priority:
+    1. yfinance tk.info (fast, free, but rate-limited on cloud IPs)
+    2. Alpha Vantage OVERVIEW (with in-memory cache to stay under 25 req/day)
+    3. Static hardcoded fallback for major tickers (always available)
     """
     from models.database import settings as _settings
+    ticker_upper = ticker.upper()
     try:
-        tk = yf.Ticker(ticker)
+        tk = yf.Ticker(ticker_upper)
         info = tk.info or {}
 
-        # If yfinance returns an empty/minimal dict (rate-limited), fall back to AV
-        if not info.get("trailingPE") and not info.get("totalRevenue") and _settings.alpha_vantage_api_key:
-            logger.info(f"yfinance returned empty data for {ticker}, trying Alpha Vantage...")
-            av_data = get_alpha_vantage_overview(ticker, _settings.alpha_vantage_api_key)
-            if av_data:
-                return _fundamentals_from_av(ticker, av_data)
+        # If yfinance returns an empty/minimal dict (rate-limited), fall back to AV then static
+        if not info.get("trailingPE") and not info.get("totalRevenue"):
+            if _settings.alpha_vantage_api_key:
+                logger.info(f"yfinance returned empty data for {ticker_upper}, trying Alpha Vantage...")
+                av_data = get_alpha_vantage_overview(ticker_upper, _settings.alpha_vantage_api_key)
+                if av_data:
+                    return _fundamentals_from_av(ticker_upper, av_data)
+            # AV also failed (or no key) — use static fallback if available
+            if ticker_upper in _STATIC_FUNDAMENTALS:
+                logger.info(f"Using static fundamentals fallback for {ticker_upper}")
+                static = _STATIC_FUNDAMENTALS[ticker_upper].copy()
+                static["ticker"] = ticker_upper
+                static["as_of_date"] = datetime.utcnow().isoformat()
+                static["source"] = "static_fallback"
+                return static
 
 
         def safe(key, default=None):
@@ -271,9 +463,9 @@ def _fundamentals_from_av(ticker: str, av: dict) -> dict:
         "eps": _f("EPS"),
         "revenue_ttm": _f("RevenueTTM"),
         "revenue_growth_yoy": _f("QuarterlyRevenueGrowthYOY", pct=True),
-        "gross_margin": _f("GrossProfitTTM") and _f("RevenueTTM") and
-                        round(_f("GrossProfitTTM") / _f("RevenueTTM") * 100, 2)
-                        if _f("RevenueTTM") else None,
+        "gross_margin": (round(_f("GrossProfitTTM") / _f("RevenueTTM") * 100, 2)
+                        if (_f("GrossProfitTTM") is not None and _f("RevenueTTM"))
+                        else None),
         "operating_margin": _f("OperatingMarginTTM", pct=True),
         "net_margin": _f("ProfitMargin", pct=True),
         "debt_to_equity": _f("DebtToEquityRatio"),
@@ -337,16 +529,25 @@ def get_peer_comps(ticker: str, sector: str, max_peers: int = 5) -> list[dict]:
 
 def get_alpha_vantage_overview(ticker: str, av_key: str) -> dict:
     """
-    Fetch company overview from Alpha Vantage.
-    Returns raw JSON dict. Caller should handle caching.
+    Fetch company overview from Alpha Vantage, with in-memory caching.
+    Checks _AV_MEMORY_CACHE before hitting the API to stay under 25 req/day.
     """
     if not av_key:
         return {}
 
+    ticker_upper = ticker.upper()
+
+    # Check in-memory cache first
+    if ticker_upper in _AV_MEMORY_CACHE:
+        cached_data, cached_at = _AV_MEMORY_CACHE[ticker_upper]
+        if time.time() - cached_at < _AV_CACHE_TTL_SECONDS:
+            logger.info(f"Alpha Vantage cache hit for {ticker_upper}")
+            return cached_data
+
     url = "https://www.alphavantage.co/query"
     params = {
         "function": "OVERVIEW",
-        "symbol": ticker,
+        "symbol": ticker_upper,
         "apikey": av_key,
     }
 
@@ -356,11 +557,15 @@ def get_alpha_vantage_overview(ticker: str, av_key: str) -> dict:
         data = resp.json()
         # AV returns {"Information": "..."} on rate limit
         if "Information" in data or "Note" in data:
-            logger.warning(f"Alpha Vantage rate limit hit for {ticker}")
+            logger.warning(f"Alpha Vantage rate limit hit for {ticker_upper}")
             return {}
+        if data and data.get("Symbol"):
+            # Cache valid response
+            _AV_MEMORY_CACHE[ticker_upper] = (data, time.time())
+            logger.info(f"Alpha Vantage data fetched and cached for {ticker_upper}")
         return data
     except Exception as e:
-        logger.error(f"get_alpha_vantage_overview({ticker}): {e}")
+        logger.error(f"get_alpha_vantage_overview({ticker_upper}): {e}")
         return {}
 
 
