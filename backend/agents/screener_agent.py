@@ -52,6 +52,12 @@ class ScreenerAgent:
                 f"Must be one of: {list(self.STRATEGY_SCORE_MAP.keys())}"
             )
 
+        from models.database import settings as _settings
+        # In fast_mode, skip yfinance entirely and go straight to fallback tickers.
+        if _settings.fast_mode:
+            logger.info("FAST_MODE enabled — skipping yfinance screener, using fallback tickers.")
+            return self._fallback_picks(strategy, sector, num_picks)
+
         score_fn = self.STRATEGY_SCORE_MAP[strategy]
         peers = get_sector_peers(sector)
 
@@ -114,43 +120,48 @@ class ScreenerAgent:
         picks = results[:num_picks]
 
         # ── Fallback: if yfinance failed for every ticker (rate-limit on cloud),
-        #    return synthetic stubs so the pipeline can still run. The Research
-        #    Agent fetches live data via its own tool calls.
+        #    return synthetic stubs so the pipeline can still run.
         if not picks:
             logger.warning(
                 "Screener got 0 results (likely yfinance rate-limit). "
                 "Using hardcoded fallback tickers."
             )
-            fallback_map: dict[str, list[str]] = {
-                "technology": ["NVDA", "MSFT", "AAPL"],
-                "healthcare": ["LLY", "JNJ", "ABBV"],
-                "financials": ["JPM", "BAC", "GS"],
-                "energy": ["XOM", "CVX", "COP"],
-                "consumer discretionary": ["AMZN", "TSLA", "MCD"],
-                "consumer staples": ["PG", "KO", "PEP"],
-                "industrials": ["HON", "CAT", "UPS"],
-                "utilities": ["NEE", "DUK", "SO"],
-                "real estate": ["PLD", "AMT", "EQIX"],
-                "materials": ["LIN", "APD", "SHW"],
-                "communication services": ["GOOGL", "META", "NFLX"],
-            }
-            fallback_tickers = fallback_map.get(sector.lower(), ["AAPL", "MSFT", "GOOGL"])
-            for fb_ticker in fallback_tickers[:num_picks]:
-                picks.append({
-                    "ticker": fb_ticker,
-                    "company_name": fb_ticker,
-                    "score": 50.0,
-                    "signals": [f"Fallback pick — live data fetch failed for sector '{sector}'"],
-                    "data_package": {
-                        "ticker": fb_ticker,
-                        "company_name": fb_ticker,
-                        "strategy": strategy,
-                        "sector": sector,
-                        "score": 50.0,
-                    },
-                })
+            picks = self._fallback_picks(strategy, sector, num_picks)
 
         return picks
+
+    def _fallback_picks(self, strategy: str, sector: str, num_picks: int) -> list[dict]:
+        """Return hardcoded top picks when live data is unavailable."""
+        fallback_map: dict[str, list[str]] = {
+            "technology": ["NVDA", "MSFT", "AAPL"],
+            "healthcare": ["LLY", "JNJ", "ABBV"],
+            "financials": ["JPM", "BAC", "GS"],
+            "energy": ["XOM", "CVX", "COP"],
+            "consumer discretionary": ["AMZN", "TSLA", "MCD"],
+            "consumer staples": ["PG", "KO", "PEP"],
+            "industrials": ["HON", "CAT", "UPS"],
+            "utilities": ["NEE", "DUK", "SO"],
+            "real estate": ["PLD", "AMT", "EQIX"],
+            "materials": ["LIN", "APD", "SHW"],
+            "communication services": ["GOOGL", "META", "NFLX"],
+        }
+        fallback_tickers = fallback_map.get(sector.lower(), ["AAPL", "MSFT", "GOOGL"])
+        return [
+            {
+                "ticker": fb_ticker,
+                "company_name": fb_ticker,
+                "score": 50.0,
+                "signals": [f"Fallback pick — live screener unavailable for sector '{sector}'"],
+                "data_package": {
+                    "ticker": fb_ticker,
+                    "company_name": fb_ticker,
+                    "strategy": strategy,
+                    "sector": sector,
+                    "score": 50.0,
+                },
+            }
+            for fb_ticker in fallback_tickers[:num_picks]
+        ]
 
     async def screen_async(
         self, strategy: str, sector: str, num_picks: int = 3

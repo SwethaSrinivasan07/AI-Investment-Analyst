@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Cost-control knobs read by agents via settings.*
     thinking_budget: int = 1024
     research_max_turns: int = 5
+    # Set FAST_MODE=true on cloud deployments with limited RAM/CPU (e.g. Render free tier).
+    # Skips yfinance screener and uses hardcoded tickers; disables extended thinking.
+    fast_mode: bool = False
 
     class Config:
         env_file = _ENV_FILE
