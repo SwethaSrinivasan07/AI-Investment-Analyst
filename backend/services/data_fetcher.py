@@ -276,13 +276,25 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
     Keys: ticker, period, data, current_price, price_change_1d_pct,
           price_change_1m_pct, price_change_3m_pct, price_change_6m_pct,
           price_change_1y_pct, ma_50, ma_200, rsi_14
+
+    On rate-limit or data unavailability, returns a minimal dict with
+    available fields rather than raising (prevents full pipeline crash).
     """
+    _empty = {
+        "ticker": ticker, "period": period, "data": [],
+        "current_price": None, "price_change_1d_pct": None,
+        "price_change_1m_pct": None, "price_change_3m_pct": None,
+        "price_change_6m_pct": None, "price_change_1y_pct": None,
+        "ma_50": None, "ma_200": None, "rsi_14": None,
+        "note": "Price data temporarily unavailable (rate limited)",
+    }
     try:
         tk = yf.Ticker(ticker)
         hist = tk.history(period=period)
 
         if hist.empty:
-            raise ValueError(f"No price data for {ticker}")
+            logger.warning(f"get_price_history({ticker}): empty history returned")
+            return _empty
 
         close = hist["Close"]
         current_price = float(close.iloc[-1])
@@ -331,8 +343,8 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
         }
 
     except Exception as e:
-        logger.error(f"get_price_history({ticker}): {e}")
-        raise
+        logger.warning(f"get_price_history({ticker}) failed ({type(e).__name__}): {e}")
+        return _empty
 
 
 def get_fundamentals(ticker: str) -> dict:
