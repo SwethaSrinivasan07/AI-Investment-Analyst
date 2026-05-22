@@ -7,6 +7,7 @@ Run with:
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,13 +17,49 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from passlib.context import CryptContext
+from sqlalchemy import select
 
 from api.auth import router as auth_router
 from api.chat import router as chat_router
 from api.memos import router as memos_router
 from api.stocks import router as stocks_router
-from models.database import init_db, settings
+from models.database import AsyncSessionLocal, init_db, settings
+from models.models import User
 from services.scheduler import start_scheduler, stop_scheduler
+
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Fixed UUID so JWTs survive DB wipes — token encodes this ID, and on every
+# fresh startup we recreate the demo user with the exact same ID.
+_DEMO_USER_ID = "00000000-demo-0000-0000-alphalens0001"
+
+
+async def _seed_demo_user() -> None:
+    """
+    Ensure the demo user exists after every startup (including post-redeploy
+    DB wipes). Uses a fixed UUID so existing JWT tokens remain valid.
+    """
+    email = os.getenv("DEMO_EMAIL", "swethas7@stanford.edu")
+    password = os.getenv("DEMO_PASSWORD", "alphalens123")
+    if not email or not password:
+        return
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(User).where(User.id == _DEMO_USER_ID))
+            if result.scalar_one_or_none() is None:
+                user = User(
+                    id=_DEMO_USER_ID,
+                    email=email,
+                    hashed_password=_pwd_context.hash(password),
+                )
+                db.add(user)
+                await db.commit()
+                logger.info(f"Demo user seeded: {email} (id={_DEMO_USER_ID})")
+            else:
+                logger.info(f"Demo user already exists: {email}")
+    except Exception as exc:
+        logger.warning(f"Demo user seed failed (non-fatal): {exc}")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +78,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting AlphaLens API...")
     await init_db()
     logger.info("Database initialised.")
+    await _seed_demo_user()
     await start_scheduler()
     logger.info("Scheduler started.")
 
