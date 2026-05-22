@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { generateMemo } from '@/lib/api'
+import { streamMemoGeneration } from '@/lib/api'
 
 interface GenerateMemoModalProps {
   onClose: () => void
@@ -58,7 +58,7 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
     pickMode === 'auto' ? selectedSector !== null : tickerInput.trim().length >= 1
   )
 
-  async function handleGenerate() {
+  function handleGenerate() {
     if (!canGenerate || !selectedStrategy) return
 
     setPhase('screening')
@@ -68,23 +68,49 @@ export default function GenerateMemoModal({ onClose }: GenerateMemoModalProps) {
     const sector = pickMode === 'auto' ? (selectedSector as string) : 'Auto'
     const ticker = pickMode === 'specific' ? tickerInput.trim().toUpperCase() : undefined
 
-    // Animate through phases while waiting for the non-streaming response
-    const phaseTimer1 = setTimeout(() => setPhase('fetching'), 3000)
-    const phaseTimer2 = setTimeout(() => setPhase('writing'), 10000)
+    const es = streamMemoGeneration(strategy, sector, ticker)
+    eventSourceRef.current = es
 
-    try {
-      const memo = await generateMemo(strategy, sector, undefined, ticker)
-      clearTimeout(phaseTimer1); clearTimeout(phaseTimer2)
-      setPhase('done')
-      router.push(`/memo/${memo.id}`)
-      onClose()
-    } catch (err: unknown) {
-      clearTimeout(phaseTimer1); clearTimeout(phaseTimer2)
+    es.onmessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data as string) as {
+          type: string
+          message?: string
+          content?: string
+          memo_id?: string
+          ticker?: string
+          recommendation?: string
+          conviction?: string
+        }
+
+        if (data.type === 'status') {
+          const msg = (data.message ?? '').toLowerCase()
+          if (msg.includes('screen')) setPhase('screening')
+          else if (msg.includes('fetch') || msg.includes('research') || msg.includes('bull') || msg.includes('bear') || msg.includes('peer')) setPhase('fetching')
+          else if (msg.includes('writ') || msg.includes('memo')) setPhase('writing')
+        } else if (data.type === 'token') {
+          setPhase('writing')
+        } else if (data.type === 'done') {
+          es.close()
+          setPhase('done')
+          if (data.memo_id) {
+            router.push(`/memo/${data.memo_id}`)
+            onClose()
+          }
+        } else if (data.type === 'error') {
+          es.close()
+          setPhase('error')
+          setErrorMessage(data.message ?? 'Generation failed. Please try again.')
+        }
+      } catch {
+        // malformed SSE line — ignore
+      }
+    }
+
+    es.onerror = () => {
+      es.close()
       setPhase('error')
-      const msg = err instanceof Error ? err.message : 'Generation failed'
-      setErrorMessage(msg.includes('500') || msg.includes('failed')
-        ? 'Generation failed on the server. Please try again.'
-        : 'Connection error during generation. Please try again.')
+      setErrorMessage('Connection error during generation. Please try again.')
     }
   }
 
