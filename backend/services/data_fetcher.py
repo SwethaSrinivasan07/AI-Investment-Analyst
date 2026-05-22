@@ -157,11 +157,22 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
 
 def get_fundamentals(ticker: str) -> dict:
     """
-    Returns key fundamental metrics from yfinance.
+    Returns key fundamental metrics.
+    Primary source: yfinance. Falls back to Alpha Vantage when yfinance
+    returns empty data (common on cloud IPs that are rate-limited).
     """
+    from models.database import settings as _settings
     try:
         tk = yf.Ticker(ticker)
         info = tk.info or {}
+
+        # If yfinance returns an empty/minimal dict (rate-limited), fall back to AV
+        if not info.get("trailingPE") and not info.get("totalRevenue") and _settings.alpha_vantage_api_key:
+            logger.info(f"yfinance returned empty data for {ticker}, trying Alpha Vantage...")
+            av_data = get_alpha_vantage_overview(ticker, _settings.alpha_vantage_api_key)
+            if av_data:
+                return _fundamentals_from_av(ticker, av_data)
+
 
         def safe(key, default=None):
             val = info.get(key, default)
@@ -229,6 +240,48 @@ def get_fundamentals(ticker: str) -> dict:
     except Exception as e:
         logger.error(f"get_fundamentals({ticker}): {e}")
         raise
+
+
+def _fundamentals_from_av(ticker: str, av: dict) -> dict:
+    """Map Alpha Vantage OVERVIEW response to the same shape as get_fundamentals."""
+    def _f(key, pct=False):
+        v = av.get(key)
+        if v in (None, "None", "-", ""):
+            return None
+        try:
+            val = float(v)
+            return round(val * 100, 2) if pct else val
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "ticker": ticker,
+        "company_name": av.get("Name"),
+        "sector": av.get("Sector"),
+        "industry": av.get("Industry"),
+        "market_cap": _f("MarketCapitalization"),
+        "pe_ratio": _f("TrailingPE"),
+        "forward_pe": _f("ForwardPE"),
+        "pb_ratio": _f("PriceToBookRatio"),
+        "ps_ratio": _f("PriceToSalesRatioTTM"),
+        "ev_ebitda": _f("EVToEBITDA"),
+        "dividend_yield": _f("DividendYield", pct=True),
+        "payout_ratio": None,
+        "beta": _f("Beta"),
+        "eps": _f("EPS"),
+        "revenue_ttm": _f("RevenueTTM"),
+        "revenue_growth_yoy": _f("QuarterlyRevenueGrowthYOY", pct=True),
+        "gross_margin": _f("GrossProfitTTM") and _f("RevenueTTM") and
+                        round(_f("GrossProfitTTM") / _f("RevenueTTM") * 100, 2)
+                        if _f("RevenueTTM") else None,
+        "operating_margin": _f("OperatingMarginTTM", pct=True),
+        "net_margin": _f("ProfitMargin", pct=True),
+        "debt_to_equity": _f("DebtToEquityRatio"),
+        "current_ratio": None,
+        "fcf_yield": None,
+        "as_of_date": datetime.utcnow().isoformat(),
+        "source": "alpha_vantage",
+    }
 
 
 def get_sector_peers(sector: str) -> list[str]:
