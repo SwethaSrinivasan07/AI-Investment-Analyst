@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Key: ticker, Value: (data_dict, unix_timestamp_fetched)
 # TTL: 23 hours so we never hit the 25/day wall within a server session
 # ---------------------------------------------------------------------------
-_AV_MEMORY_CACHE: dict[str, tuple[dict, float]] = {}
+_AV_MEMORY_CACHE = {}
 _AV_CACHE_TTL_SECONDS = 23 * 3600  # 23 hours
 
 
@@ -30,7 +30,7 @@ _AV_CACHE_TTL_SECONDS = 23 * 3600  # 23 hours
 # Values are approximate trailing-twelve-month figures sourced from public
 # financial data. Used only when live data is unavailable.
 # ---------------------------------------------------------------------------
-_STATIC_FUNDAMENTALS: dict[str, dict] = {
+_STATIC_FUNDAMENTALS = {
     "AAPL": dict(company_name="Apple Inc.", sector="Technology", industry="Consumer Electronics",
                  market_cap=3_050_000_000_000, pe_ratio=33.0, forward_pe=28.5, pb_ratio=49.0,
                  ps_ratio=8.1, ev_ebitda=24.0, dividend_yield=0.5, payout_ratio=15.0,
@@ -346,8 +346,18 @@ def get_fundamentals(ticker: str) -> dict:
     from models.database import settings as _settings
     ticker_upper = ticker.upper()
     try:
-        tk = yf.Ticker(ticker_upper)
-        info = tk.info or {}
+        # In FAST_MODE, skip yfinance tk.info entirely — it hangs on rate-limited cloud IPs.
+        # Go straight to Alpha Vantage → static fallback.
+        tk = None
+        if _settings.fast_mode:
+            info = {}
+        else:
+            try:
+                tk = yf.Ticker(ticker_upper)
+                info = tk.info or {}
+            except Exception as yfe:
+                logger.warning(f"yfinance .info error for {ticker_upper}: {yfe}")
+                info = {}
 
         # If yfinance returns an empty/minimal dict (rate-limited), fall back to AV then static
         if not info.get("trailingPE") and not info.get("totalRevenue"):
@@ -378,7 +388,7 @@ def get_fundamentals(ticker: str) -> dict:
         # Revenue growth YoY from income statement
         revenue_growth_yoy = None
         try:
-            fin = tk.financials
+            fin = tk.financials if tk is not None else None
             if fin is not None and not fin.empty and "Total Revenue" in fin.index:
                 rev = fin.loc["Total Revenue"]
                 if len(rev) >= 2:
@@ -392,7 +402,7 @@ def get_fundamentals(ticker: str) -> dict:
         # FCF yield
         fcf_yield = None
         try:
-            cashflow = tk.cashflow
+            cashflow = tk.cashflow if tk is not None else None
             market_cap = safe("marketCap")
             if cashflow is not None and not cashflow.empty and market_cap:
                 ops = cashflow.loc["Total Cash From Operating Activities"].iloc[0] if "Total Cash From Operating Activities" in cashflow.index else None
