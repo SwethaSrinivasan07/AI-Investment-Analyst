@@ -269,6 +269,102 @@ def _compute_rsi(series: pd.Series, period: int = 14) -> float:
 # Core data functions
 # ---------------------------------------------------------------------------
 
+def _get_price_history_av(ticker: str, av_key: str) -> dict:
+    """
+    Fetch full price history from Alpha Vantage TIME_SERIES_DAILY.
+    Computes all the same metrics as get_price_history (MAs, RSI, momentum).
+    Results are cached in _AV_MEMORY_CACHE with a 1-hour TTL.
+    """
+    ticker_upper = ticker.upper()
+    cache_key = f"price_{ticker_upper}"
+
+    # Check in-memory cache (1-hour TTL for price data)
+    if cache_key in _AV_MEMORY_CACHE:
+        cached_data, cached_at = _AV_MEMORY_CACHE[cache_key]
+        if time.time() - cached_at < 3600:
+            logger.info(f"AV price cache hit for {ticker_upper}")
+            return cached_data
+
+    try:
+        resp = requests.get(
+            "https://www.alphavantage.co/query",
+            params={
+                "function": "TIME_SERIES_DAILY",
+                "symbol": ticker_upper,
+                "outputsize": "full",  # 20 years of daily data
+                "apikey": av_key,
+            },
+            timeout=15,
+        )
+        data = resp.json()
+
+        if "Information" in data or "Note" in data:
+            logger.warning(f"AV rate limit for TIME_SERIES_DAILY {ticker_upper}")
+            return {}
+
+        ts = data.get("Time Series (Daily)", {})
+        if not ts:
+            return {}
+
+        # Sort dates most-recent first
+        dates = sorted(ts.keys(), reverse=True)
+        closes = [float(ts[d]["4. close"]) for d in dates]
+
+        if not closes:
+            return {}
+
+        current_price = closes[0]
+
+        def pct_chg(days: int) -> float:
+            if len(closes) <= days:
+                return 0.0
+            past = closes[days]
+            return ((current_price - past) / past) * 100 if past else 0.0
+
+        # Build pandas Series oldest→newest for rolling calcs
+        close_series = pd.Series(closes[::-1])
+        ma_50 = float(close_series.rolling(50).mean().iloc[-1]) if len(closes) >= 50 else None
+        ma_200 = float(close_series.rolling(200).mean().iloc[-1]) if len(closes) >= 200 else None
+        rsi_14 = _compute_rsi(close_series)
+
+        # Last 90 calendar days of OHLCV for chart (oldest→newest)
+        chart_dates = dates[:90][::-1]
+        data_records = []
+        for d in chart_dates:
+            row = ts[d]
+            data_records.append({
+                "date": d,
+                "open": round(float(row["1. open"]), 4),
+                "high": round(float(row["2. high"]), 4),
+                "low": round(float(row["3. low"]), 4),
+                "close": round(float(row["4. close"]), 4),
+                "volume": int(float(row["5. volume"])),
+            })
+
+        result = {
+            "ticker": ticker_upper,
+            "period": "1y",
+            "data": data_records,
+            "current_price": round(current_price, 2),
+            "price_change_1d_pct": round(pct_chg(1), 2),
+            "price_change_1m_pct": round(pct_chg(21), 2),
+            "price_change_3m_pct": round(pct_chg(63), 2),
+            "price_change_6m_pct": round(pct_chg(126), 2),
+            "price_change_1y_pct": round(pct_chg(252) if len(closes) >= 253 else pct_chg(len(closes) - 1), 2),
+            "ma_50": round(ma_50, 2) if ma_50 else None,
+            "ma_200": round(ma_200, 2) if ma_200 else None,
+            "rsi_14": round(rsi_14, 2),
+            "source": "alpha_vantage",
+        }
+
+        _AV_MEMORY_CACHE[cache_key] = (result, time.time())
+        return result
+
+    except Exception as e:
+        logger.error(f"_get_price_history_av({ticker_upper}): {e}")
+        return {}
+
+
 def get_price_history(ticker: str, period: str = "1y") -> dict:
     """
     Returns price history with technical indicators.
@@ -344,23 +440,16 @@ def get_price_history(ticker: str, period: str = "1y") -> dict:
 
     except Exception as e:
         logger.warning(f"get_price_history({ticker}) failed ({type(e).__name__}): {e}")
-        # Try Alpha Vantage GLOBAL_QUOTE as a minimal price fallback
+        # Full fallback: Alpha Vantage TIME_SERIES_DAILY (gives everything we need)
         try:
             from models.database import settings as _s
             if _s.alpha_vantage_api_key:
-                resp = requests.get(
-                    "https://www.alphavantage.co/query",
-                    params={"function": "GLOBAL_QUOTE", "symbol": ticker, "apikey": _s.alpha_vantage_api_key},
-                    timeout=8,
-                )
-                q = resp.json().get("Global Quote", {})
-                if q.get("05. price"):
-                    price = float(q["05. price"])
-                    chg_pct = float(q.get("10. change percent", "0").rstrip("%"))
-                    return {**_empty, "current_price": round(price, 2),
-                            "price_change_1d_pct": round(chg_pct, 2), "note": "Price via Alpha Vantage"}
+                av_result = _get_price_history_av(ticker, _s.alpha_vantage_api_key)
+                if av_result:
+                    logger.info(f"get_price_history({ticker}): using Alpha Vantage fallback")
+                    return av_result
         except Exception as av_e:
-            logger.warning(f"AV price fallback also failed for {ticker}: {av_e}")
+            logger.warning(f"AV price fallback failed for {ticker}: {av_e}")
         return _empty
 
 
